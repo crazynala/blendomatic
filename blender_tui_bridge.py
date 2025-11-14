@@ -95,29 +95,29 @@ try:
         elif command == 'render_with_config':
             # Configure everything at once then render
             config_data = args
-            print(f"[RENDER_CONFIG] 🚀 Starting render with full config")
-            print(f"[RENDER_CONFIG] Config keys: {list(config_data.keys())}")
-            print(f"[RENDER_CONFIG] Full config: {json.dumps(config_data, indent=2)}")
+            print(f"[RENDER_CONFIG] 🚀 Starting render with full config", flush=True)
+            print(f"[RENDER_CONFIG] Config keys: {list(config_data.keys())}", flush=True)
+            print(f"[RENDER_CONFIG] Full config: {json.dumps(config_data, indent=2)}", flush=True)
             
-            print(f"[RENDER_CONFIG] 🔧 Setting mode: {config_data['mode']}")
+            print(f"[RENDER_CONFIG] 🔧 Setting mode: {config_data['mode']}", flush=True)
             session.set_mode(config_data['mode'])
-            print(f"[RENDER_CONFIG] ✅ Mode '{config_data['mode']}' applied")
+            print(f"[RENDER_CONFIG] ✅ Mode '{config_data['mode']}' applied", flush=True)
             
-            print(f"[RENDER_CONFIG] 👔 Setting garment: {config_data['garment']}")
+            print(f"[RENDER_CONFIG] 👔 Setting garment: {config_data['garment']}", flush=True)
             session.set_garment(config_data['garment'])
-            print(f"[RENDER_CONFIG] ✅ Garment '{config_data['garment']}' loaded")
+            print(f"[RENDER_CONFIG] ✅ Garment '{config_data['garment']}' loaded", flush=True)
             
-            print(f"[RENDER_CONFIG] 🧵 Setting fabric: {config_data['fabric']}")
+            print(f"[RENDER_CONFIG] 🧵 Setting fabric: {config_data['fabric']}", flush=True)
             session.set_fabric(config_data['fabric'])
-            print(f"[RENDER_CONFIG] ✅ Fabric '{config_data['fabric']}' applied")
+            print(f"[RENDER_CONFIG] ✅ Fabric '{config_data['fabric']}' applied", flush=True)
             
-            print(f"[RENDER_CONFIG] 🎯 Setting asset: {config_data['asset']}")
+            print(f"[RENDER_CONFIG] 🎯 Setting asset: {config_data['asset']}", flush=True)
             session.set_asset(config_data['asset'])
-            print(f"[RENDER_CONFIG] ✅ Asset '{config_data['asset']}' loaded")
+            print(f"[RENDER_CONFIG] ✅ Asset '{config_data['asset']}' loaded", flush=True)
             
-            print("[RENDER_CONFIG] 🎬 Starting render process...")
+            print("[RENDER_CONFIG] 🎬 Starting render process...", flush=True)
             output_path = session.render()
-            print(f"[RENDER_CONFIG] 🎉 Render completed successfully: {output_path}")
+            print(f"[RENDER_CONFIG] 🎉 Render completed successfully: {output_path}", flush=True)
             result['result'] = output_path
         else:
             result['error'] = f'Unknown command: {command}'

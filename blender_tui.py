@@ -91,6 +91,11 @@ class BlenderTUIApp(App):
         margin: 1;
         padding: 1;
         border-top: solid white;
+        overflow: hidden;
+    }
+    
+    Log {
+        scrollbar-size: 1 1;
     }
     
     SelectionList {
@@ -497,6 +502,7 @@ class BlenderTUIApp(App):
         self.is_rendering = True
         self.render_button.display = False
         self.cancel_button.display = True
+        self.refresh()  # Force UI refresh to show button changes
         
         self.write_message("🎬 Starting render...")
         
@@ -537,10 +543,8 @@ class BlenderTUIApp(App):
             log_task = asyncio.create_task(self.tail_log_file(log_file_path))
             
             # Create render task
-            render_task = asyncio.create_task(
-                asyncio.get_event_loop().run_in_executor(
-                    None, lambda: self.session.render_with_config(config)
-                )
+            render_task = asyncio.get_event_loop().run_in_executor(
+                None, lambda: self.session.render_with_config(config)
             )
             self.current_render_task = render_task
             
@@ -569,6 +573,7 @@ class BlenderTUIApp(App):
             self.render_button.display = True
             self.cancel_button.display = False
             self.current_render_task = None
+            self.refresh()  # Force UI refresh to show button changes
     
     @on(Button.Pressed, "#cancel_btn")
     async def cancel_render(self):
@@ -589,6 +594,7 @@ class BlenderTUIApp(App):
         self.render_button.display = True
         self.cancel_button.display = False
         self.current_render_task = None
+        self.refresh()  # Force UI refresh to show button changes
         
         self.write_message("🛑 Render cancelled")
     

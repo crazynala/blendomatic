@@ -119,16 +119,16 @@ class RenderSession:
             available = ", ".join(self.list_modes())
             raise ValueError(f"Unknown mode '{mode_name}'. Available: {available}")
         
-        print(f"[SET_MODE] Setting mode to: {mode_name}")
-        print(f"[SET_MODE] Available modes: {list(self.render_cfg['modes'].keys())}")
+        print(f"[SET_MODE] Setting mode to: {mode_name}", flush=True)
+        print(f"[SET_MODE] Available modes: {list(self.render_cfg['modes'].keys())}", flush=True)
         
         self.mode = mode_name
         self.render_settings = self.render_cfg["modes"][mode_name]
         
-        print(f"[SET_MODE] Loaded render settings for '{mode_name}': {self.render_settings}")
+        print(f"[SET_MODE] Loaded render settings for '{mode_name}': {self.render_settings}", flush=True)
         
         self._apply_render_settings(self.render_settings)
-        print(f"[SET_MODE] ✅ Mode '{mode_name}' set and applied successfully")
+        print(f"[SET_MODE] ✅ Mode '{mode_name}' set and applied successfully", flush=True)
     
     def set_garment(self, garment_name: str) -> None:
         """Set garment and load its blend file"""
@@ -232,13 +232,13 @@ class RenderSession:
         """Apply render configuration to Blender scene"""
         scene = bpy.context.scene
         
-        print(f"[RENDER_SETTINGS] Starting to apply render settings from config: {config}")
+        print(f"[RENDER_SETTINGS] Starting to apply render settings from config: {config}", flush=True)
         
         # Engine
         old_engine = scene.render.engine
         new_engine = config.get("engine", "CYCLES")
         scene.render.engine = new_engine
-        print(f"[RENDER_SETTINGS] Engine: {old_engine} → {new_engine}")
+        print(f"[RENDER_SETTINGS] Engine: {old_engine} → {new_engine}", flush=True)
         
         # Resolution
         res = config.get("resolution", {})
@@ -250,7 +250,7 @@ class RenderSession:
         scene.render.resolution_y = res.get("y", 1080)
         scene.render.resolution_percentage = res.get("scale", 100)
         
-        print(f"[RENDER_SETTINGS] Resolution: {old_res_x}x{old_res_y}@{old_scale}% → {scene.render.resolution_x}x{scene.render.resolution_y}@{scene.render.resolution_percentage}%")
+        print(f"[RENDER_SETTINGS] Resolution: {old_res_x}x{old_res_y}@{old_scale}% → {scene.render.resolution_x}x{scene.render.resolution_y}@{scene.render.resolution_percentage}%", flush=True)
         
         # Samples
         if scene.render.engine == "CYCLES":
@@ -264,18 +264,18 @@ class RenderSession:
             scene.cycles.device = config.get("device", "GPU")
             scene.cycles.preview_samples = config.get("preview_samples", 4)
             
-            print(f"[RENDER_SETTINGS] Samples: {old_samples} → {scene.cycles.samples}")
-            print(f"[RENDER_SETTINGS] Adaptive sampling: {old_adaptive} → {scene.cycles.use_adaptive_sampling}")
-            print(f"[RENDER_SETTINGS] Device: {old_device} → {scene.cycles.device}")
-            print(f"[RENDER_SETTINGS] Preview samples: {old_preview} → {scene.cycles.preview_samples}")
+            print(f"[RENDER_SETTINGS] Samples: {old_samples} → {scene.cycles.samples}", flush=True)
+            print(f"[RENDER_SETTINGS] Adaptive sampling: {old_adaptive} → {scene.cycles.use_adaptive_sampling}", flush=True)
+            print(f"[RENDER_SETTINGS] Device: {old_device} → {scene.cycles.device}", flush=True)
+            print(f"[RENDER_SETTINGS] Preview samples: {old_preview} → {scene.cycles.preview_samples}", flush=True)
         
         # Output format
         old_format = scene.render.image_settings.file_format
         fmt = config.get("output_format", "PNG").upper()
         scene.render.image_settings.file_format = fmt
-        print(f"[RENDER_SETTINGS] Output format: {old_format} → {fmt}")
+        print(f"[RENDER_SETTINGS] Output format: {old_format} → {fmt}", flush=True)
         
-        print(f"[RENDER_SETTINGS] ✅ All render settings applied successfully")
+        print(f"[RENDER_SETTINGS] ✅ All render settings applied successfully", flush=True)
     
     def _apply_fabric_material(self, fabric: Dict):
         """Create and assign material based on fabric config"""
