@@ -397,6 +397,33 @@ Status: {'Ready to render' if all([self.selected_mode, self.selected_garment, se
         
         self.status_display.update(status_text)
     
+    async def tail_log_file(self, log_file_path: str):
+        """Tail the Blender log file and stream output to TUI"""
+        last_position = 0
+        
+        while True:
+            try:
+                await asyncio.sleep(0.5)  # Check every 0.5 seconds
+                
+                if Path(log_file_path).exists():
+                    with open(log_file_path, 'r') as f:
+                        f.seek(last_position)
+                        new_content = f.read()
+                        
+                        if new_content:
+                            # Split into lines and show each one
+                            for line in new_content.split('\n'):
+                                if line.strip():
+                                    self.write_message(f"🔧 {line}")
+                            
+                            last_position = f.tell()
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.write_message(f"❌ Error tailing log: {e}")
+                break
+    
     @on(Button.Pressed, "#render_btn")
     async def render(self):
         self.write_message("🎬 Starting render...")
@@ -426,14 +453,33 @@ Status: {'Ready to render' if all([self.selected_mode, self.selected_garment, se
             self.write_message("🔧 Configuring Blender and rendering...")
             self.write_message(f"📋 Sending config: {config}")
             
-            start_time = asyncio.get_event_loop().time()
-            output_path = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: self.session.render_with_config(config)
+            # Get log file path for tailing
+            log_file_path = await asyncio.get_event_loop().run_in_executor(
+                None, self.session.get_log_file_path
             )
+            self.write_message(f"� Streaming log from: {log_file_path}")
+            
+            start_time = asyncio.get_event_loop().time()
+            
+            # Start log tailing
+            log_task = asyncio.create_task(self.tail_log_file(log_file_path))
+            
+            try:
+                output_path = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self.session.render_with_config(config)
+                )
+            finally:
+                # Cancel log tailing
+                log_task.cancel()
+                try:
+                    await log_task
+                except asyncio.CancelledError:
+                    pass
             end_time = asyncio.get_event_loop().time()
             
             self.write_message(f"⏱️  Render took {end_time - start_time:.1f} seconds")
             self.write_message(f"🎉 Render completed: {output_path}")
+            self.write_message("📄 Log file preserved for debugging")
             
         except ValueError as e:
             self.write_message(f"❌ Configuration error: {e}")

@@ -24,9 +24,14 @@ class BlenderBridge:
         self.config_file = self.temp_dir / "config.json"
         self.result_file = self.temp_dir / "result.json"
         self.script_file = self.temp_dir / "blender_script.py"
+        self.log_file = self.temp_dir / "blender.log"
         
         # Generate the Blender script that will be executed
         self._create_blender_script()
+        
+        # Store last execution output for debugging
+        self.last_stdout = ""
+        self.last_stderr = ""
         
         print(f"[BRIDGE] Temp directory: {self.temp_dir}")
     
@@ -165,14 +170,35 @@ except Exception as e:
             # Use longer timeout for render operations
             timeout = 180 if command in ['render', 'render_with_config'] else 60
             print(f"[BRIDGE] Using timeout: {timeout} seconds for command: {command}")
+            print(f"[BRIDGE] Logging to: {self.log_file}")
             
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            # Clear/create log file
+            with open(self.log_file, 'w') as f:
+                f.write(f"[BRIDGE] Starting command: {command}\n")
+                f.write(f"[BRIDGE] Args: {args}\n")
+                f.write(f"[BRIDGE] Command: {' '.join(cmd)}\n")
+                f.write("-" * 50 + "\n")
+            
+            # Run Blender with output streaming to log file
+            with open(self.log_file, 'a') as log_f:
+                result = subprocess.run(
+                    cmd, 
+                    stdout=log_f, 
+                    stderr=subprocess.STDOUT,  # Combine stderr with stdout
+                    text=True, 
+                    timeout=timeout
+                )
+            
             print(f"[BRIDGE] Blender exit code: {result.returncode}")
             
-            if result.stdout:
-                print(f"[BRIDGE] Blender stdout: {result.stdout[:500]}...")  # First 500 chars
-            if result.stderr:
-                print(f"[BRIDGE] Blender stderr: {result.stderr[:500]}...")  # First 500 chars
+            # Read the log file for storage
+            with open(self.log_file, 'r') as f:
+                log_content = f.read()
+            
+            self.last_stdout = log_content
+            self.last_stderr = ""  # Combined into stdout
+            
+            print(f"[BRIDGE] Log file size: {len(log_content)} chars")
             
             # Wait for result file
             max_wait = 10  # seconds
@@ -192,6 +218,17 @@ except Exception as e:
             return {'success': False, 'error': 'Command timed out', 'result': None}
         except Exception as e:
             return {'success': False, 'error': f'Execution error: {str(e)}', 'result': None}
+    
+    def get_last_output(self) -> Dict[str, str]:
+        """Get the stdout/stderr from the last command execution"""
+        return {
+            'stdout': self.last_stdout,
+            'stderr': self.last_stderr
+        }
+    
+    def get_log_file_path(self) -> str:
+        """Get the path to the current log file"""
+        return str(self.log_file)
     
     def cleanup(self):
         """Clean up temporary files"""
@@ -288,6 +325,14 @@ class BlenderTUISession:
             return result['result']
         else:
             raise Exception(result['error'])
+    
+    def get_last_output(self) -> Dict[str, str]:
+        """Get the stdout/stderr from the last command execution"""
+        return self.bridge.get_last_output()
+    
+    def get_log_file_path(self) -> str:
+        """Get the path to the current log file"""
+        return self.bridge.get_log_file_path()
     
     def cleanup(self):
         """Clean up resources"""
