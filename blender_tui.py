@@ -188,22 +188,22 @@ class BlenderTUIApp(App):
             if self.mode_list:
                 self.mode_list.clear_options()
                 for mode in modes:
-                    self.mode_list.add_option(mode)
+                    self.mode_list.add_option((mode, mode))
             
             if self.garment_list:
                 self.garment_list.clear_options()
                 for garment in garments:
-                    self.garment_list.add_option(garment)
+                    self.garment_list.add_option((garment, garment))
                 
             if self.fabric_list:
                 self.fabric_list.clear_options()
                 for fabric in fabrics:
-                    self.fabric_list.add_option(fabric)
+                    self.fabric_list.add_option((fabric, fabric))
                 
             if self.asset_list:
                 self.asset_list.clear_options()
                 for asset in assets:
-                    self.asset_list.add_option(asset)
+                    self.asset_list.add_option((asset, asset))
             
             self.write_message("📋 Lists refreshed")
             
