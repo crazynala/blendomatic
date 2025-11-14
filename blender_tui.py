@@ -616,54 +616,45 @@ class BlenderTUIApp(App):
                     self.write_message(f"⏱️  Render took {end_time - start_time:.1f} seconds")
                     self.write_message(f"🎉 Render completed: {output_path}")
             else:
-                # Multiple combinations - render each synchronously
-                self.write_message(f"🔧 Rendering {total_combinations} fabric x asset combinations...")
+                # Multiple combinations - use batch rendering in single Blender process
+                self.write_message(f"🔧 Rendering {total_combinations} fabric x asset combinations in batch...")
                 
-                for i, config in enumerate(configs, 1):
-                    if not self.is_rendering:  # Check if cancelled
-                        self.write_message("🛑 Render cancelled by user")
-                        break
-                        
-                    self.write_message(f"🎨 [{i}/{total_combinations}] Rendering: {config['fabric']} × {config['asset']}")
+                try:
+                    # Execute all combinations in a single Blender process
+                    batch_result = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: self.session.render_multiple_configs(configs)
+                    )
                     
-                    try:
-                        # Execute render for this combination
-                        render_result = await asyncio.get_event_loop().run_in_executor(
-                            None, lambda cfg=config: self.session.render_with_config(cfg)
-                        )
-                        
-                        if not render_result.get('success'):
-                            error_msg = render_result.get('error', 'Unknown render error')
-                            failed_renders.append(f"{config['fabric']} × {config['asset']}: {error_msg}")
-                            self.write_message(f"❌ [{i}/{total_combinations}] Failed: {error_msg}")
-                            continue
-                        
-                        # For multiple combinations, force synchronous mode
-                        output_path = render_result.get('result')
-                        successful_renders.append(f"{config['fabric']} × {config['asset']}: {output_path}")
-                        self.write_message(f"✅ [{i}/{total_combinations}] Completed: {output_path}")
+                    successful_renders = batch_result.get('successful_renders', [])
+                    failed_renders = batch_result.get('failed_renders', [])
                     
-                    except Exception as e:
-                        failed_renders.append(f"{config['fabric']} × {config['asset']}: {str(e)}")
-                        self.write_message(f"❌ [{i}/{total_combinations}] Exception: {e}")
-                
-                # Summary for multiple renders
-                end_time = asyncio.get_event_loop().time()
-                self.write_message(f"⏱️  Total render time: {end_time - start_time:.1f} seconds")
-                
-                if successful_renders:
-                    self.write_message(f"🎉 {len(successful_renders)} renders completed successfully:")
-                    for render in successful_renders:
-                        self.write_message(f"  ✅ {render}")
-                
-                if failed_renders:
-                    self.write_message(f"❌ {len(failed_renders)} renders failed:")
-                    for render in failed_renders:
-                        self.write_message(f"  ❌ {render}")
-                
-                if not successful_renders and not failed_renders:
-                    self.write_message("🛑 No renders completed")
-                self.write_message("📄 Log file preserved for debugging")
+                    # Summary for batch renders
+                    end_time = asyncio.get_event_loop().time()
+                    self.write_message(f"⏱️  Total render time: {end_time - start_time:.1f} seconds")
+                    
+                    if successful_renders:
+                        self.write_message(f"🎉 {len(successful_renders)} renders completed successfully:")
+                        for render in successful_renders:
+                            fabric = render['fabric']
+                            asset = render['asset']
+                            output_path = render['output_path']
+                            self.write_message(f"  ✅ {fabric} × {asset}: {output_path}")
+                    
+                    if failed_renders:
+                        self.write_message(f"❌ {len(failed_renders)} renders failed:")
+                        for render in failed_renders:
+                            fabric = render['fabric']
+                            asset = render['asset']
+                            error = render['error']
+                            self.write_message(f"  ❌ {fabric} × {asset}: {error}")
+                    
+                    if not successful_renders and not failed_renders:
+                        self.write_message("🛑 No renders completed")
+                        
+                except Exception as e:
+                    self.write_message(f"❌ Batch render failed: {e}")
+            
+            self.write_message("📄 Log file preserved for debugging")
             
         except ValueError as e:
             self.write_message(f"❌ Configuration error: {e}")

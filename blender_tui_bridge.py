@@ -137,6 +137,63 @@ try:
             output_path = session.render()
             print(f"[RENDER_CONFIG] 🎉 Render completed successfully: {output_path}", flush=True)
             result['result'] = output_path
+        elif command == 'render_multiple_configs':
+            # Render multiple fabric x asset combinations sequentially
+            configs = args.get('configs', [])
+            total_configs = len(configs)
+            print(f"[MULTI_RENDER] 🚀 Starting batch render of {total_configs} configurations", flush=True)
+            
+            successful_renders = []
+            failed_renders = []
+            
+            for i, config_data in enumerate(configs, 1):
+                try:
+                    print(f"[MULTI_RENDER] [{i}/{total_configs}] Starting: {config_data['fabric']} × {config_data['asset']}", flush=True)
+                    
+                    # Load garment (only needed for first render if same garment)
+                    if i == 1 or config_data['garment'] != configs[i-2]['garment']:
+                        print(f"[MULTI_RENDER] [{i}/{total_configs}] Loading garment: {config_data['garment']}", flush=True)
+                        session.set_garment(config_data['garment'])
+                    
+                    # Apply fabric
+                    print(f"[MULTI_RENDER] [{i}/{total_configs}] Applying fabric: {config_data['fabric']}", flush=True)
+                    session.set_fabric(config_data['fabric'])
+                    
+                    # Configure asset
+                    print(f"[MULTI_RENDER] [{i}/{total_configs}] Configuring asset: {config_data['asset']}", flush=True)
+                    session.set_asset(config_data['asset'])
+                    
+                    # Apply mode settings (only if changed)
+                    if i == 1 or config_data['mode'] != configs[i-2]['mode']:
+                        print(f"[MULTI_RENDER] [{i}/{total_configs}] Setting mode: {config_data['mode']}", flush=True)
+                        session.set_mode(config_data['mode'])
+                    
+                    # Render
+                    print(f"[MULTI_RENDER] [{i}/{total_configs}] Rendering...", flush=True)
+                    output_path = session.render()
+                    
+                    successful_renders.append({
+                        'fabric': config_data['fabric'],
+                        'asset': config_data['asset'],
+                        'output_path': output_path
+                    })
+                    print(f"[MULTI_RENDER] [{i}/{total_configs}] ✅ Completed: {output_path}", flush=True)
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    failed_renders.append({
+                        'fabric': config_data['fabric'],
+                        'asset': config_data['asset'],
+                        'error': error_msg
+                    })
+                    print(f"[MULTI_RENDER] [{i}/{total_configs}] ❌ Failed: {error_msg}", flush=True)
+            
+            result['result'] = {
+                'successful_renders': successful_renders,
+                'failed_renders': failed_renders,
+                'total_attempted': total_configs
+            }
+            print(f"[MULTI_RENDER] 🎉 Batch complete: {len(successful_renders)} successful, {len(failed_renders)} failed", flush=True)
         else:
             result['error'] = f'Unknown command: {command}'
         
@@ -187,9 +244,15 @@ except Exception as e:
         print(f"[BRIDGE] Executing: {' '.join(cmd)}")
         
         try:
-            # Use detached execution for render operations
+            # Use detached execution for render operations unless explicitly disabled
             if command in ['render', 'render_with_config']:
-                return self._execute_render_detached(cmd, command, args)
+                # Check if synchronous execution is requested
+                force_sync = args.get('force_synchronous', False)
+                if force_sync:
+                    timeout = args.get('timeout_seconds', 3600)  # Default 1 hour for renders
+                    print(f"[BRIDGE] Force synchronous mode - timeout: {timeout} seconds")
+                else:
+                    return self._execute_render_detached(cmd, command, args)
             else:
                 timeout = 60
             print(f"[BRIDGE] Using timeout: {timeout} seconds for command: {command}")
@@ -475,12 +538,34 @@ class BlenderTUISession:
         else:
             raise Exception(result['error'])
     
+    def render_multiple_configs(self, configs: List[Dict]) -> Dict:
+        """Render multiple fabric x asset combinations sequentially in the same Blender process"""
+        result = self.bridge.execute_command('render_multiple_configs', {'configs': configs})
+        if result['success']:
+            self._refresh_state()
+            return result['result']
+        else:
+            raise Exception(result['error'])
+    
     def render_with_config(self, config: Dict[str, str]) -> Dict:
         """Configure Blender and render with all settings at once"""
         result = self.bridge.execute_command('render_with_config', config)
         if result['success']:
             self._refresh_state()
             return result  # Return full result dict for detached rendering
+        else:
+            raise Exception(result['error'])
+    
+    def render_with_config_sync(self, config: Dict[str, str]) -> Dict:
+        """Configure Blender and render synchronously (waits for completion)"""
+        # Add flag to force synchronous execution
+        sync_config = config.copy()
+        sync_config['force_synchronous'] = True
+        
+        result = self.bridge.execute_command('render_with_config', sync_config)
+        if result['success']:
+            self._refresh_state()
+            return result
         else:
             raise Exception(result['error'])
     
