@@ -13,8 +13,8 @@
     "prod": {
       "engine": "CYCLES",
       "device": "GPU",
-      "samples": 256,
-      "preview_samples": 64,
+      "samples": 1200,
+      "preview_samples": 2,
       "adaptive_sampling": true,
       "resolution": {"x": 1200, "y": 1200, "scale": 100},
       "output_format": "PNG"
@@ -22,8 +22,8 @@
     "preview": {
       "engine": "CYCLES",
       "device": "GPU",
-      "samples": 16,
-      "preview_samples": 8,
+      "samples": 32,
+      "preview_samples": 2,
       "adaptive_sampling": true,
       "resolution": {"x": 800, "y": 800, "scale": 100},
       "output_format": "PNG"
