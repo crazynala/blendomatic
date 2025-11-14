@@ -237,6 +237,8 @@ class BlenderTUIApp(App):
             self.write_message("📁 Running in file-only mode (no rendering)")
             if self.status_display:
                 self.status_display.update("File-only mode - Blender bridge unavailable")
+        
+        self.write_message("✅ TUI ready - click on items to select them")
     
     def write_message(self, message: str):
         """Write message to the message display (avoiding 'log' method name)"""
@@ -305,16 +307,21 @@ class BlenderTUIApp(App):
     
     async def refresh_assets_list(self):
         """Refresh only the assets list (called after garment selection)"""
+        self.write_message(f"🔍 DEBUG: refresh_assets_list called, current_garment_name: {self.current_garment_name}")
+        
         if not self.asset_list:
+            self.write_message("🔍 DEBUG: asset_list is None")
             return
         
         try:
             # Get assets from local garment file (no bridge needed)
             assets = []
             if self.current_garment_name:
+                self.write_message(f"🔍 DEBUG: Getting assets for garment: {self.current_garment_name}")
                 assets = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: self._get_garment_assets(self.current_garment_name)
                 )
+                self.write_message(f"🔍 DEBUG: Found {len(assets)} assets: {assets}")
             
             self.asset_list.clear_options()
             for asset in assets:
@@ -328,50 +335,53 @@ class BlenderTUIApp(App):
             
         except Exception as e:
             self.write_message(f"❌ Failed to refresh assets: {e}")
+            import traceback
+            self.write_message(f"🔍 DEBUG: Traceback: {traceback.format_exc()}")
     
 
-    @on(SelectionList.OptionSelected, "#mode_list")
-    async def on_mode_selected(self, event):
-        mode = event.option.prompt if hasattr(event.option, 'prompt') else str(event.option)
-        
-        self.selected_mode = mode
-        self.write_message(f"✅ Mode selected: {mode}")
-        await self.update_local_status()
+
     
-    @on(SelectionList.OptionSelected, "#garment_list")
-    async def on_garment_selected(self, event):
-        garment = event.option.prompt if hasattr(event.option, 'prompt') else str(event.option)
-        
-        # Update local state
-        self.current_garment_name = garment
-        self.selected_garment = garment
-        
-        self.write_message(f"✅ Garment selected: {garment}")
-        
-        # Refresh assets list since it depends on the selected garment
-        await self.refresh_assets_list()
-        await self.update_local_status()
+    @on(SelectionList.SelectedChanged, "#mode_list")
+    async def on_mode_selection_changed(self, event: SelectionList.SelectedChanged):
+        if self.mode_list and self.mode_list.selected:
+            selected = self.mode_list.selected
+            mode = selected[0] if isinstance(selected, list) else selected
+            self.selected_mode = mode
+            self.write_message(f"✅ Mode selected: {mode}")
+            await self.update_local_status()
     
-    @on(SelectionList.OptionSelected, "#fabric_list")
-    async def on_fabric_selected(self, event):
-        fabric = event.option.prompt if hasattr(event.option, 'prompt') else str(event.option)
-        
-        self.selected_fabric = fabric
-        self.write_message(f"✅ Fabric selected: {fabric}")
-        await self.update_local_status()
+    @on(SelectionList.SelectedChanged, "#garment_list")
+    async def on_garment_selection_changed(self, event: SelectionList.SelectedChanged):
+        if self.garment_list and self.garment_list.selected:
+            selected = self.garment_list.selected
+            garment = selected[0] if isinstance(selected, list) else selected
+            self.current_garment_name = garment
+            self.selected_garment = garment
+            self.write_message(f"✅ Garment selected: {garment}")
+            await self.refresh_assets_list()
+            await self.update_local_status()
     
-    @on(SelectionList.OptionSelected, "#asset_list")
-    async def on_asset_selected(self, event):
-        asset = event.option.prompt if hasattr(event.option, 'prompt') else str(event.option)
-        
-        # Check if garment is set locally
+    @on(SelectionList.SelectedChanged, "#fabric_list")
+    async def on_fabric_selection_changed(self, event: SelectionList.SelectedChanged):
+        if self.fabric_list and self.fabric_list.selected:
+            selected = self.fabric_list.selected
+            fabric = selected[0] if isinstance(selected, list) else selected
+            self.selected_fabric = fabric
+            self.write_message(f"✅ Fabric selected: {fabric}")
+            await self.update_local_status()
+    
+    @on(SelectionList.SelectedChanged, "#asset_list")
+    async def on_asset_selection_changed(self, event: SelectionList.SelectedChanged):
         if not self.current_garment_name:
             self.write_message("❌ Please select a garment first")
             return
-        
-        self.selected_asset = asset
-        self.write_message(f"✅ Asset selected: {asset}")
-        await self.update_local_status()
+            
+        if self.asset_list and self.asset_list.selected:
+            selected = self.asset_list.selected
+            asset = selected[0] if isinstance(selected, list) else selected
+            self.selected_asset = asset
+            self.write_message(f"✅ Asset selected: {asset}")
+            await self.update_local_status()
     
     async def update_local_status(self):
         """Update status display with local selections"""
