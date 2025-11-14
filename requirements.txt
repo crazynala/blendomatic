@@ -1,0 +1,12 @@
+# Requirements for Blendomatic TUI
+# Install these in Blender's Python environment:
+# /path/to/blender/python/bin/pip install -r requirements.txt
+
+# Core TUI framework
+textual>=0.45.0
+
+# Rich text formatting (dependency of textual)
+rich>=13.0.0
+
+# Optional: Enhanced prompts and selections
+questionary>=2.0.0
