@@ -42,13 +42,27 @@ Examples:
     
     elif args.interface == 'tui':
         try:
-            from tui import main as tui_main
-            tui_main()
+            from simple_tui import main as simple_tui_main
+            simple_tui_main()
         except ImportError as e:
             print(f"Error: TUI interface requires 'textual' package.")
             print("Install with: pip install textual")
             print("Or use --interface shell for a simpler interface")
-            sys.exit(1)
+            print("\nFalling back to shell interface...")
+            try:
+                from shell import main as shell_main
+                shell_main()
+            except ImportError:
+                print("Shell interface also not available. Using wizard.")
+                run_wizard()
+        except Exception as e:
+            print(f"TUI error: {e}")
+            print("Falling back to shell interface...")
+            try:
+                from shell import main as shell_main
+                shell_main()
+            except ImportError:
+                run_wizard()
     
     else:  # wizard (default)
         # Run original wizard interface
