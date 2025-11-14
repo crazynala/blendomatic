@@ -335,6 +335,7 @@ class BlenderTUIApp(App):
                 self.mode_list.clear_options()
                 for mode in modes:
                     self.mode_list.add_option((mode, mode))
+                self.write_message(f"🔧 DEBUG: Loaded modes: {modes}")
             
             if self.garment_list:
                 self.garment_list.clear_options()
@@ -510,6 +511,7 @@ class BlenderTUIApp(App):
             # Validate configuration
             config = self.validate_render_config()
             self.write_message(f"✅ Configuration validated: {config}")
+            self.write_message(f"🔧 DEBUG: Selected mode for render: '{self.selected_mode}'")
             
             # Check if bridge is available
             if not self.session:

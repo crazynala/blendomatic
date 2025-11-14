@@ -49,7 +49,13 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath("__file__")))
 
 try:
+    print("[BRIDGE_SCRIPT] 🚀 Bridge script starting execution", flush=True)
+    import sys
+    sys.stdout.flush()
+    
     from render_session import RenderSession
+    print("[BRIDGE_SCRIPT] ✅ RenderSession imported", flush=True)
+    sys.stdout.flush()
     
     # Load configuration from temp file
     config_file = Path(sys.argv[-2])  # Second to last argument
@@ -58,8 +64,15 @@ try:
     with open(config_file, 'r') as f:
         config = json.load(f)
     
+    print(f"[BRIDGE_SCRIPT] 📋 Loaded config: {config}", flush=True)
+    sys.stdout.flush()
+    
     # Initialize session and execute command
+    print("[BRIDGE_SCRIPT] 🔧 Initializing RenderSession...", flush=True)
+    sys.stdout.flush()
     session = RenderSession()
+    print("[BRIDGE_SCRIPT] ✅ RenderSession initialized", flush=True)
+    sys.stdout.flush()
     
     command = config.get('command')
     args = config.get('args', {})

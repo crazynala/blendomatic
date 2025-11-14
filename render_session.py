@@ -119,16 +119,21 @@ class RenderSession:
             available = ", ".join(self.list_modes())
             raise ValueError(f"Unknown mode '{mode_name}'. Available: {available}")
         
+        import sys
         print(f"[SET_MODE] Setting mode to: {mode_name}", flush=True)
+        sys.stdout.flush()
         print(f"[SET_MODE] Available modes: {list(self.render_cfg['modes'].keys())}", flush=True)
+        sys.stdout.flush()
         
         self.mode = mode_name
         self.render_settings = self.render_cfg["modes"][mode_name]
         
         print(f"[SET_MODE] Loaded render settings for '{mode_name}': {self.render_settings}", flush=True)
+        sys.stdout.flush()
         
         self._apply_render_settings(self.render_settings)
         print(f"[SET_MODE] ✅ Mode '{mode_name}' set and applied successfully", flush=True)
+        sys.stdout.flush()
     
     def set_garment(self, garment_name: str) -> None:
         """Set garment and load its blend file"""
@@ -232,13 +237,16 @@ class RenderSession:
         """Apply render configuration to Blender scene"""
         scene = bpy.context.scene
         
+        import sys
         print(f"[RENDER_SETTINGS] Starting to apply render settings from config: {config}", flush=True)
+        sys.stdout.flush()
         
         # Engine
         old_engine = scene.render.engine
         new_engine = config.get("engine", "CYCLES")
         scene.render.engine = new_engine
         print(f"[RENDER_SETTINGS] Engine: {old_engine} → {new_engine}", flush=True)
+        sys.stdout.flush()
         
         # Resolution
         res = config.get("resolution", {})
