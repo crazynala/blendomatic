@@ -87,6 +87,15 @@ try:
         elif command == 'render':
             output_path = session.render()
             result['result'] = output_path
+        elif command == 'render_with_config':
+            # Configure everything at once then render
+            config_data = args
+            session.set_mode(config_data['mode'])
+            session.set_garment(config_data['garment'])
+            session.set_fabric(config_data['fabric'])
+            session.set_asset(config_data['asset'])
+            output_path = session.render()
+            result['result'] = output_path
         else:
             result['error'] = f'Unknown command: {command}'
         
@@ -239,6 +248,15 @@ class BlenderTUISession:
     
     def render(self) -> str:
         result = self.bridge.execute_command('render')
+        if result['success']:
+            self._refresh_state()
+            return result['result']
+        else:
+            raise Exception(result['error'])
+    
+    def render_with_config(self, config: Dict[str, str]) -> str:
+        """Configure Blender and render with all settings at once"""
+        result = self.bridge.execute_command('render_with_config', config)
         if result['success']:
             self._refresh_state()
             return result['result']
