@@ -346,20 +346,56 @@ class RenderSession:
         """Configure individual mesh object based on config"""
         obj = self._safe_get_obj(mesh_config["name"])
         if not obj:
+            print(f"[WARN] Mesh object not found: {mesh_config['name']}", flush=True)
             return
         
+        # Log configuration being applied
+        print(f"[MESH_CONFIG] Configuring mesh: {mesh_config['name']}", flush=True)
+        
         # Rendering visibility
-        obj.hide_render = not mesh_config.get("render", True)
-        obj.cycles.is_holdout = mesh_config.get("holdout", False)
-        obj.cycles.is_shadow_catcher = mesh_config.get("shadow_catcher", False)
+        render_enabled = mesh_config.get("render", True)
+        obj.hide_render = not render_enabled
+        print(f"[MESH_CONFIG]   render: {render_enabled} (hide_render: {obj.hide_render})", flush=True)
+        
+        # Check render engine
+        render_engine = bpy.context.scene.render.engine
+        print(f"[MESH_CONFIG]   render_engine: {render_engine}", flush=True)
+        
+        # Holdout configuration
+        holdout_enabled = mesh_config.get("holdout", False)
+        if hasattr(obj, 'cycles'):
+            obj.cycles.is_holdout = holdout_enabled
+            print(f"[MESH_CONFIG]   holdout: {holdout_enabled} (is_holdout: {obj.cycles.is_holdout})", flush=True)
+        else:
+            print(f"[WARN] Object {obj.name} has no cycles properties - render engine issue?", flush=True)
+        
+        # Shadow catcher configuration
+        shadow_catcher_enabled = mesh_config.get("shadow_catcher", False)
+        if hasattr(obj, 'cycles'):
+            obj.cycles.is_shadow_catcher = shadow_catcher_enabled
+            print(f"[MESH_CONFIG]   shadow_catcher: {shadow_catcher_enabled} (is_shadow_catcher: {obj.cycles.is_shadow_catcher})", flush=True)
+        else:
+            print(f"[WARN] Object {obj.name} has no cycles properties for shadow_catcher - render engine issue?", flush=True)
         
         # Viewport visibility
         show_in_viewport = mesh_config.get("show_in_viewport", True)
         obj.hide_viewport = not show_in_viewport
         obj.hide_set(not show_in_viewport)
+        print(f"[MESH_CONFIG]   show_in_viewport: {show_in_viewport} (hide_viewport: {obj.hide_viewport})", flush=True)
+        
+        print(f"[MESH_CONFIG] ✅ {mesh_config['name']} configured successfully", flush=True)
     
     def _configure_asset(self, asset: Dict) -> None:
         """Configure asset by applying mesh configurations"""
-        print(f"[INFO] Configuring asset: {asset['name']}")
+        print(f"[INFO] Configuring asset: {asset['name']}", flush=True)
+        
+        # Verify render engine is Cycles before configuring mesh objects
+        render_engine = bpy.context.scene.render.engine
+        print(f"[ASSET_CONFIG] Current render engine: {render_engine}", flush=True)
+        if render_engine != "CYCLES":
+            print(f"[WARN] Render engine is {render_engine}, not CYCLES. Holdout/shadow_catcher may not work.", flush=True)
+        
         for mesh in asset.get("meshes", []):
             self._configure_mesh_object(mesh)
+        
+        print(f"[ASSET_CONFIG] ✅ Asset '{asset['name']}' configured with {len(asset.get('meshes', []))} meshes", flush=True)

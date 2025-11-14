@@ -576,93 +576,52 @@ class BlenderTUIApp(App):
             successful_renders = []
             failed_renders = []
             
-            # For single combination, use detached rendering; for multiple, use synchronous
-            if total_combinations == 1:
-                # Single combination - use existing detached logic
-                config = configs[0]
-                self.write_message("🔧 Configuring Blender and rendering...")
+            # Render each fabric x asset combination
+            for i, config in enumerate(configs, 1):
+                if not self.is_rendering:  # Check if cancelled
+                    self.write_message("🛑 Render cancelled by user")
+                    break
+                    
+                self.write_message(f"🎨 [{i}/{total_combinations}] Rendering: {config['fabric']} × {config['asset']}")
                 
-                render_result = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: self.session.render_with_config(config)
-                )
+                try:
+                    # Execute render for this combination
+                    render_result = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda cfg=config: self.session.render_with_config(cfg)
+                    )
+                    
+                    if not render_result.get('success'):
+                        error_msg = render_result.get('error', 'Unknown render error')
+                        failed_renders.append(f"{config['fabric']} × {config['asset']}: {error_msg}")
+                        self.write_message(f"❌ [{i}/{total_combinations}] Failed: {error_msg}")
+                        continue
+            
+            if render_result.get('detached'):
+                # Detached render started successfully
+                self.render_pid = render_result.get('pid')
+                self.write_message(f"🚀 Render started in background (PID: {self.render_pid})")
                 
-                if not render_result.get('success'):
-                    raise Exception(render_result.get('error', 'Unknown render error'))
+                # Start log tailing
+                log_file_path = render_result.get('log_file')
+                if log_file_path:
+                    log_task = asyncio.create_task(self.tail_log_file(log_file_path))
+                    self.current_log_task = log_task
+                    self.write_message(f"� Streaming log from: {log_file_path}")
                 
-                if render_result.get('detached'):
-                    # Detached render started successfully
-                    self.render_pid = render_result.get('pid')
-                    self.write_message(f"🚀 Render started in background (PID: {self.render_pid})")
-                    
-                    # Start log tailing
-                    log_file_path = render_result.get('log_file')
-                    if log_file_path:
-                        log_task = asyncio.create_task(self.tail_log_file(log_file_path))
-                        self.current_log_task = log_task
-                        self.write_message(f"📄 Streaming log from: {log_file_path}")
-                    
-                    # Start monitoring the render process
-                    monitor_task = asyncio.create_task(self.monitor_render_process())
-                    self.current_render_task = monitor_task
-                    
-                    # Don't wait for completion - return immediately
-                    self.write_message("✅ Render started successfully! Use Cancel to stop.")
-                    return
-                else:
-                    # Synchronous render completed
-                    output_path = render_result.get('result')
-                    end_time = asyncio.get_event_loop().time()
-                    
-                    self.write_message(f"⏱️  Render took {end_time - start_time:.1f} seconds")
-                    self.write_message(f"🎉 Render completed: {output_path}")
+                # Start monitoring the render process
+                monitor_task = asyncio.create_task(self.monitor_render_process())
+                self.current_render_task = monitor_task
+                
+                # Don't wait for completion - return immediately
+                self.write_message("✅ Render started successfully! Use Cancel to stop.")
+                return
             else:
-                # Multiple combinations - render each synchronously
-                self.write_message(f"🔧 Rendering {total_combinations} fabric x asset combinations...")
-                
-                for i, config in enumerate(configs, 1):
-                    if not self.is_rendering:  # Check if cancelled
-                        self.write_message("🛑 Render cancelled by user")
-                        break
-                        
-                    self.write_message(f"🎨 [{i}/{total_combinations}] Rendering: {config['fabric']} × {config['asset']}")
-                    
-                    try:
-                        # Execute render for this combination
-                        render_result = await asyncio.get_event_loop().run_in_executor(
-                            None, lambda cfg=config: self.session.render_with_config(cfg)
-                        )
-                        
-                        if not render_result.get('success'):
-                            error_msg = render_result.get('error', 'Unknown render error')
-                            failed_renders.append(f"{config['fabric']} × {config['asset']}: {error_msg}")
-                            self.write_message(f"❌ [{i}/{total_combinations}] Failed: {error_msg}")
-                            continue
-                        
-                        # For multiple combinations, force synchronous mode
-                        output_path = render_result.get('result')
-                        successful_renders.append(f"{config['fabric']} × {config['asset']}: {output_path}")
-                        self.write_message(f"✅ [{i}/{total_combinations}] Completed: {output_path}")
-                    
-                    except Exception as e:
-                        failed_renders.append(f"{config['fabric']} × {config['asset']}: {str(e)}")
-                        self.write_message(f"❌ [{i}/{total_combinations}] Exception: {e}")
-                
-                # Summary for multiple renders
+                # Synchronous render (fallback)
+                output_path = render_result.get('result')
                 end_time = asyncio.get_event_loop().time()
-                self.write_message(f"⏱️  Total render time: {end_time - start_time:.1f} seconds")
                 
-                if successful_renders:
-                    self.write_message(f"🎉 {len(successful_renders)} renders completed successfully:")
-                    for render in successful_renders:
-                        self.write_message(f"  ✅ {render}")
-                
-                if failed_renders:
-                    self.write_message(f"❌ {len(failed_renders)} renders failed:")
-                    for render in failed_renders:
-                        self.write_message(f"  ❌ {render}")
-                
-                if not successful_renders and not failed_renders:
-                    self.write_message("🛑 No renders completed")
+                self.write_message(f"⏱️  Render took {end_time - start_time:.1f} seconds")
+                self.write_message(f"🎉 Render completed: {output_path}")
                 self.write_message("📄 Log file preserved for debugging")
             
         except ValueError as e:
