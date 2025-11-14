@@ -434,12 +434,12 @@ class BlenderTUISession:
         else:
             raise Exception(result['error'])
     
-    def render_with_config(self, config: Dict[str, str]) -> str:
+    def render_with_config(self, config: Dict[str, str]) -> Dict:
         """Configure Blender and render with all settings at once"""
         result = self.bridge.execute_command('render_with_config', config)
         if result['success']:
             self._refresh_state()
-            return result['result']
+            return result  # Return full result dict for detached rendering
         else:
             raise Exception(result['error'])
     
