@@ -141,35 +141,52 @@ try:
             # Render multiple fabric x asset combinations sequentially
             configs = args.get('configs', [])
             total_configs = len(configs)
-            print(f"[MULTI_RENDER] 🚀 Starting batch render of {total_configs} configurations", flush=True)
+            
+            # Initialize log for batch rendering
+            import sys
+            import os
+            
+            # Write to both console and log file
+            def log_and_print(msg):
+                print(msg, flush=True)
+                # Also write to log file if available
+                log_file = args.get('log_file')
+                if log_file:
+                    try:
+                        with open(log_file, 'a') as f:
+                            f.write(f"{msg}\\n")
+                    except:
+                        pass  # Continue if log file write fails
+            
+            log_and_print(f"[MULTI_RENDER] 🚀 Starting batch render of {total_configs} configurations")
             
             successful_renders = []
             failed_renders = []
             
             for i, config_data in enumerate(configs, 1):
                 try:
-                    print(f"[MULTI_RENDER] [{i}/{total_configs}] Starting: {config_data['fabric']} × {config_data['asset']}", flush=True)
+                    log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] Starting: {config_data['fabric']} × {config_data['asset']}")
                     
                     # Load garment (only needed for first render if same garment)
                     if i == 1 or config_data['garment'] != configs[i-2]['garment']:
-                        print(f"[MULTI_RENDER] [{i}/{total_configs}] Loading garment: {config_data['garment']}", flush=True)
+                        log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] Loading garment: {config_data['garment']}")
                         session.set_garment(config_data['garment'])
                     
                     # Apply fabric
-                    print(f"[MULTI_RENDER] [{i}/{total_configs}] Applying fabric: {config_data['fabric']}", flush=True)
+                    log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] Applying fabric: {config_data['fabric']}")
                     session.set_fabric(config_data['fabric'])
                     
                     # Configure asset
-                    print(f"[MULTI_RENDER] [{i}/{total_configs}] Configuring asset: {config_data['asset']}", flush=True)
+                    log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] Configuring asset: {config_data['asset']}")
                     session.set_asset(config_data['asset'])
                     
                     # Apply mode settings (only if changed)
                     if i == 1 or config_data['mode'] != configs[i-2]['mode']:
-                        print(f"[MULTI_RENDER] [{i}/{total_configs}] Setting mode: {config_data['mode']}", flush=True)
+                        log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] Setting mode: {config_data['mode']}")
                         session.set_mode(config_data['mode'])
                     
                     # Render
-                    print(f"[MULTI_RENDER] [{i}/{total_configs}] Rendering...", flush=True)
+                    log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] Rendering...")
                     output_path = session.render()
                     
                     successful_renders.append({
@@ -177,7 +194,7 @@ try:
                         'asset': config_data['asset'],
                         'output_path': output_path
                     })
-                    print(f"[MULTI_RENDER] [{i}/{total_configs}] ✅ Completed: {output_path}", flush=True)
+                    log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] ✅ Completed: {output_path}")
                     
                 except Exception as e:
                     error_msg = str(e)
@@ -186,14 +203,14 @@ try:
                         'asset': config_data['asset'],
                         'error': error_msg
                     })
-                    print(f"[MULTI_RENDER] [{i}/{total_configs}] ❌ Failed: {error_msg}", flush=True)
+                    log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] ❌ Failed: {error_msg}")
             
             result['result'] = {
                 'successful_renders': successful_renders,
                 'failed_renders': failed_renders,
                 'total_attempted': total_configs
             }
-            print(f"[MULTI_RENDER] 🎉 Batch complete: {len(successful_renders)} successful, {len(failed_renders)} failed", flush=True)
+            log_and_print(f"[MULTI_RENDER] 🎉 Batch complete: {len(successful_renders)} successful, {len(failed_renders)} failed")
         else:
             result['error'] = f'Unknown command: {command}'
         
@@ -540,7 +557,12 @@ class BlenderTUISession:
     
     def render_multiple_configs(self, configs: List[Dict]) -> Dict:
         """Render multiple fabric x asset combinations sequentially in the same Blender process"""
-        result = self.bridge.execute_command('render_multiple_configs', {'configs': configs})
+        # Pass the log file path so batch rendering can write to it
+        log_file_path = self.bridge.get_log_file_path()
+        result = self.bridge.execute_command('render_multiple_configs', {
+            'configs': configs,
+            'log_file': log_file_path
+        })
         if result['success']:
             self._refresh_state()
             return result['result']

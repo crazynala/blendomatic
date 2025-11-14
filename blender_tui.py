@@ -424,51 +424,48 @@ class BlenderTUIApp(App):
 
 
     
-    @on(SelectionList.SelectedChanged, "#mode_list")
-    async def on_mode_selection_changed(self, event: SelectionList.SelectedChanged):
-        if self.mode_list and self.mode_list.selected:
-            selected = self.mode_list.selected
-            mode = selected[0] if isinstance(selected, list) else selected
-            self.selected_mode = mode
-            self.write_message(f"✅ Mode selected: {mode}")
-            await self.update_local_status()
+    async def on_selection_list_selection_toggled(self, event):
+        """Handle selection changes for all SelectionLists"""
+        list_id = event.selection_list.id
+        
+        if list_id == "mode_list":
+            if self.mode_list and self.mode_list.selected:
+                selected = self.mode_list.selected
+                mode = selected[0] if isinstance(selected, list) else selected
+                self.selected_mode = mode
+                self.write_message(f"✅ Mode selected: {mode}")
+        elif list_id == "garment_list":
+            if self.garment_list and self.garment_list.selected:
+                selected = self.garment_list.selected
+                garment = selected[0] if isinstance(selected, list) else selected
+                self.current_garment_name = garment
+                self.selected_garment = garment
+                self.write_message(f"✅ Garment selected: {garment}")
+                await self.refresh_assets_list()
+        elif list_id == "fabric_list":
+            if self.fabric_list and self.fabric_list.selected:
+                self.selected_fabrics = list(self.fabric_list.selected)
+                fabric_count = len(self.selected_fabrics)
+                if fabric_count == 1:
+                    self.write_message(f"✅ Fabric selected: {self.selected_fabrics[0]}")
+                else:
+                    self.write_message(f"✅ {fabric_count} fabrics selected: {', '.join(self.selected_fabrics)}")
+        elif list_id == "asset_list":
+            if not self.current_garment_name:
+                self.write_message("❌ Please select a garment first")
+                return
+                
+            if self.asset_list and self.asset_list.selected:
+                self.selected_assets = list(self.asset_list.selected)
+                asset_count = len(self.selected_assets)
+                if asset_count == 1:
+                    self.write_message(f"✅ Asset selected: {self.selected_assets[0]}")
+                else:
+                    self.write_message(f"✅ {asset_count} assets selected: {', '.join(self.selected_assets)}")
+        
+        await self.update_local_status()
     
-    @on(SelectionList.SelectedChanged, "#garment_list")
-    async def on_garment_selection_changed(self, event: SelectionList.SelectedChanged):
-        if self.garment_list and self.garment_list.selected:
-            selected = self.garment_list.selected
-            garment = selected[0] if isinstance(selected, list) else selected
-            self.current_garment_name = garment
-            self.selected_garment = garment
-            self.write_message(f"✅ Garment selected: {garment}")
-            await self.refresh_assets_list()
-            await self.update_local_status()
-    
-    @on(SelectionList.SelectedChanged, "#fabric_list")
-    async def on_fabric_selection_changed(self, event: SelectionList.SelectedChanged):
-        if self.fabric_list and self.fabric_list.selected:
-            self.selected_fabrics = list(self.fabric_list.selected)
-            fabric_count = len(self.selected_fabrics)
-            if fabric_count == 1:
-                self.write_message(f"✅ Fabric selected: {self.selected_fabrics[0]}")
-            else:
-                self.write_message(f"✅ {fabric_count} fabrics selected: {', '.join(self.selected_fabrics)}")
-            await self.update_local_status()
-    
-    @on(SelectionList.SelectedChanged, "#asset_list")
-    async def on_asset_selection_changed(self, event: SelectionList.SelectedChanged):
-        if not self.current_garment_name:
-            self.write_message("❌ Please select a garment first")
-            return
-            
-        if self.asset_list and self.asset_list.selected:
-            self.selected_assets = list(self.asset_list.selected)
-            asset_count = len(self.selected_assets)
-            if asset_count == 1:
-                self.write_message(f"✅ Asset selected: {self.selected_assets[0]}")
-            else:
-                self.write_message(f"✅ {asset_count} assets selected: {', '.join(self.selected_assets)}")
-            await self.update_local_status()
+
     
     async def on_checkbox_changed(self, event):
         """Handle timeout checkbox changes"""
@@ -619,6 +616,18 @@ class BlenderTUIApp(App):
                 # Multiple combinations - use batch rendering in single Blender process
                 self.write_message(f"🔧 Rendering {total_combinations} fabric x asset combinations in batch...")
                 
+                # Start log streaming for batch rendering
+                log_file_path = self.session.bridge.get_log_file_path()
+                if log_file_path:
+                    # Clear existing log content and start tailing
+                    try:
+                        open(log_file_path, 'w').close()  # Clear log file
+                    except:
+                        pass
+                    log_task = asyncio.create_task(self.tail_log_file(log_file_path))
+                    self.current_log_task = log_task
+                    self.write_message(f"📄 Streaming batch render log from: {log_file_path}")
+                
                 try:
                     # Execute all combinations in a single Blender process
                     batch_result = await asyncio.get_event_loop().run_in_executor(
@@ -653,6 +662,11 @@ class BlenderTUIApp(App):
                         
                 except Exception as e:
                     self.write_message(f"❌ Batch render failed: {e}")
+                finally:
+                    # Stop log streaming for batch rendering
+                    if self.current_log_task:
+                        self.current_log_task.cancel()
+                        self.current_log_task = None
             
             self.write_message("📄 Log file preserved for debugging")
             
