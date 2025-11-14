@@ -4,6 +4,8 @@ This version avoids all conflicts with Textual's internal log property
 """
 import asyncio
 import json
+import signal
+import sys
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -154,6 +156,8 @@ class BlenderTUIApp(App):
         # Rendering state
         self.is_rendering: bool = False
         self.current_render_task: Optional[asyncio.Task] = None
+        self.current_log_task: Optional[asyncio.Task] = None
+        self.render_pid: Optional[int] = None
     
     def _load_json_file(self, file_path: Path) -> Dict[str, Any]:
         """Load a JSON file safely"""
@@ -215,6 +219,10 @@ class BlenderTUIApp(App):
             errors.append("Asset not selected")
         else:
             config['asset'] = self.selected_asset
+        
+        # Add timeout configuration if enabled
+        if self.timeout_enabled:
+            config['timeout_seconds'] = self.timeout_seconds
         
         if errors:
             raise ValueError(f"Missing selections: {', '.join(errors)}")
@@ -308,12 +316,26 @@ class BlenderTUIApp(App):
     async def refresh_all_lists(self):
         """Refresh all selection lists"""
         try:
-            # Get modes from Blender bridge (only modes need Blender)
+            # Get modes from render config file (local loading as fallback)
             modes = []
             if self.session:
-                modes = await asyncio.get_event_loop().run_in_executor(
-                    None, self.session.list_modes
-                )
+                try:
+                    modes = await asyncio.get_event_loop().run_in_executor(
+                        None, self.session.list_modes
+                    )
+                    self.write_message(f"🔧 DEBUG: Loaded modes from Blender bridge: {modes}")
+                except Exception as e:
+                    self.write_message(f"⚠️ Bridge mode loading failed: {e}")
+            
+            # Fallback: load modes directly from render config file
+            if not modes:
+                try:
+                    with open("render_config.json", 'r') as f:
+                        config_data = json.load(f)
+                        modes = list(config_data.get("modes", {}).keys())
+                        self.write_message(f"🔧 DEBUG: Loaded modes from local config: {modes}")
+                except Exception as e:
+                    self.write_message(f"❌ Failed to load modes from config: {e}")
             
             # Get garments and fabrics from local files (no Blender needed)
             garments = await asyncio.get_event_loop().run_in_executor(
@@ -541,29 +563,41 @@ class BlenderTUIApp(App):
             
             start_time = asyncio.get_event_loop().time()
             
-            # Start log tailing
-            log_task = asyncio.create_task(self.tail_log_file(log_file_path))
-            
-            # Create render task
-            render_task = asyncio.get_event_loop().run_in_executor(
+            # Start render in detached process
+            render_result = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: self.session.render_with_config(config)
             )
-            self.current_render_task = render_task
             
-            try:
-                output_path = await render_task
-            finally:
-                # Cancel log tailing
-                log_task.cancel()
-                try:
-                    await log_task
-                except asyncio.CancelledError:
-                    pass
-            end_time = asyncio.get_event_loop().time()
+            if not render_result.get('success'):
+                raise Exception(render_result.get('error', 'Unknown render error'))
             
-            self.write_message(f"⏱️  Render took {end_time - start_time:.1f} seconds")
-            self.write_message(f"🎉 Render completed: {output_path}")
-            self.write_message("📄 Log file preserved for debugging")
+            if render_result.get('detached'):
+                # Detached render started successfully
+                self.render_pid = render_result.get('pid')
+                self.write_message(f"🚀 Render started in background (PID: {self.render_pid})")
+                
+                # Start log tailing
+                log_file_path = render_result.get('log_file')
+                if log_file_path:
+                    log_task = asyncio.create_task(self.tail_log_file(log_file_path))
+                    self.current_log_task = log_task
+                    self.write_message(f"� Streaming log from: {log_file_path}")
+                
+                # Start monitoring the render process
+                monitor_task = asyncio.create_task(self.monitor_render_process())
+                self.current_render_task = monitor_task
+                
+                # Don't wait for completion - return immediately
+                self.write_message("✅ Render started successfully! Use Cancel to stop.")
+                return
+            else:
+                # Synchronous render (fallback)
+                output_path = render_result.get('result')
+                end_time = asyncio.get_event_loop().time()
+                
+                self.write_message(f"⏱️  Render took {end_time - start_time:.1f} seconds")
+                self.write_message(f"🎉 Render completed: {output_path}")
+                self.write_message("📄 Log file preserved for debugging")
             
         except ValueError as e:
             self.write_message(f"❌ Configuration error: {e}")
@@ -575,7 +609,47 @@ class BlenderTUIApp(App):
             self.render_button.display = True
             self.cancel_button.display = False
             self.current_render_task = None
+            self.current_log_task = None
+            self.render_pid = None
             self.refresh()  # Force UI refresh to show button changes
+    
+    async def monitor_render_process(self):
+        """Monitor the detached render process and update status"""
+        if not self.session or not self.render_pid:
+            return
+        
+        try:
+            while True:
+                # Check render status
+                status = await asyncio.get_event_loop().run_in_executor(
+                    None, self.session.check_render_status
+                )
+                
+                if not status.get('running', False):
+                    # Render finished
+                    exit_code = status.get('exit_code', 0)
+                    if exit_code == 0:
+                        self.write_message("🎉 Render completed successfully!")
+                    else:
+                        self.write_message(f"❌ Render failed with exit code: {exit_code}")
+                    
+                    # Reset render state
+                    self.is_rendering = False
+                    self.render_button.display = True
+                    self.cancel_button.display = False
+                    self.current_render_task = None
+                    self.render_pid = None
+                    self.refresh()
+                    break
+                
+                # Still running, wait before checking again
+                await asyncio.sleep(5)  # Check every 5 seconds
+                
+        except asyncio.CancelledError:
+            # Task was cancelled (user clicked cancel)
+            pass
+        except Exception as e:
+            self.write_message(f"⚠️ Error monitoring render: {e}")
     
     @on(Button.Pressed, "#cancel_btn")
     async def cancel_render(self):
@@ -584,18 +658,42 @@ class BlenderTUIApp(App):
             
         self.write_message("❌ Cancelling render...")
         
-        if self.current_render_task:
-            self.current_render_task.cancel()
-            try:
-                await self.current_render_task
-            except asyncio.CancelledError:
-                pass
+        try:
+            # Cancel detached render process
+            if self.session and self.render_pid:
+                cancel_result = await asyncio.get_event_loop().run_in_executor(
+                    None, self.session.cancel_render
+                )
+                if cancel_result.get('success'):
+                    self.write_message(f"✅ {cancel_result.get('result', 'Render cancelled')}")
+                else:
+                    self.write_message(f"⚠️ Cancellation issue: {cancel_result.get('error', 'Unknown error')}")
+            
+            # Cancel monitoring and log tasks
+            if self.current_render_task:
+                self.current_render_task.cancel()
+                try:
+                    await asyncio.wait_for(self.current_render_task, timeout=2.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+            
+            if self.current_log_task:
+                self.current_log_task.cancel()
+                try:
+                    await asyncio.wait_for(self.current_log_task, timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+                    
+        except Exception as e:
+            self.write_message(f"⚠️ Error during cancellation: {e}")
         
         # Reset state
         self.is_rendering = False
         self.render_button.display = True
         self.cancel_button.display = False
         self.current_render_task = None
+        self.current_log_task = None
+        self.render_pid = None
         self.refresh()  # Force UI refresh to show button changes
         
         self.write_message("🛑 Render cancelled")
@@ -636,10 +734,21 @@ def main():
     else:
         blender_path = "blender"
     
+    # Add signal handler for graceful shutdown
+    def signal_handler(signum, frame):
+        print("\n🛑 Interrupt received, shutting down...")
+        sys.exit(0)
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     # Run the app with proper error handling
     try:
         app = BlenderTUIApp(blender_path)
         app.run()
+    except KeyboardInterrupt:
+        print("\n🛑 Interrupted by user")
+        sys.exit(0)
     except Exception as e:
         print(f"\n❌ TUI error: {e}")
         print("This may happen due to terminal compatibility issues.")

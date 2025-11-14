@@ -9,6 +9,7 @@ import json
 import tempfile
 import os
 import sys
+import signal
 from pathlib import Path
 from typing import Dict, List, Optional
 import time
@@ -32,6 +33,10 @@ class BlenderBridge:
         # Store last execution output for debugging
         self.last_stdout = ""
         self.last_stderr = ""
+        
+        # Track render process for cancellation
+        self.render_process = None
+        self.render_pid = None
         
         print(f"[BRIDGE] Temp directory: {self.temp_dir}")
     
@@ -182,8 +187,11 @@ except Exception as e:
         print(f"[BRIDGE] Executing: {' '.join(cmd)}")
         
         try:
-            # Use longer timeout for render operations
-            timeout = 180 if command in ['render', 'render_with_config'] else 60
+            # Use detached execution for render operations
+            if command in ['render', 'render_with_config']:
+                return self._execute_render_detached(cmd, command, args)
+            else:
+                timeout = 60
             print(f"[BRIDGE] Using timeout: {timeout} seconds for command: {command}")
             print(f"[BRIDGE] Logging to: {self.log_file}")
             
@@ -244,6 +252,101 @@ except Exception as e:
     def get_log_file_path(self) -> str:
         """Get the path to the current log file"""
         return str(self.log_file)
+    
+    def _execute_render_detached(self, cmd: List[str], command: str, args: Dict) -> Dict:
+        """Execute render command in detached subprocess"""
+        print(f"[BRIDGE] Starting detached render process")
+        
+        # Clear/create log file
+        with open(self.log_file, 'w') as f:
+            f.write(f"[BRIDGE] Starting detached command: {command}\n")
+            f.write(f"[BRIDGE] Args: {args}\n")
+            f.write(f"[BRIDGE] Command: {' '.join(cmd)}\n")
+            f.write("-" * 50 + "\n")
+        
+        # Start subprocess in detached mode
+        with open(self.log_file, 'a') as log_f:
+            process = subprocess.Popen(
+                cmd,
+                stdout=log_f,
+                stderr=subprocess.STDOUT,
+                text=True,
+                # Detach from parent process
+                start_new_session=True
+            )
+        
+        # Store process info for potential cancellation
+        self.render_process = process
+        self.render_pid = process.pid
+        
+        print(f"[BRIDGE] Render started with PID: {process.pid}")
+        print(f"[BRIDGE] Logging to: {self.log_file}")
+        
+        # Return immediately - render runs in background
+        return {
+            "success": True, 
+            "result": f"Render started (PID: {process.pid})",
+            "pid": process.pid,
+            "log_file": str(self.log_file),
+            "detached": True
+        }
+    
+    def cancel_render(self) -> Dict:
+        """Cancel the currently running render process"""
+        if not hasattr(self, 'render_process') or not self.render_process:
+            return {"success": False, "error": "No render process to cancel"}
+        
+        try:
+            import signal
+            # Try graceful shutdown first
+            self.render_process.terminate()
+            
+            # Wait a bit for graceful shutdown
+            try:
+                self.render_process.wait(timeout=5)
+                return {"success": True, "result": "Render cancelled gracefully"}
+            except subprocess.TimeoutExpired:
+                # Force kill if graceful shutdown fails
+                self.render_process.kill()
+                return {"success": True, "result": "Render force-cancelled"}
+                
+        except Exception as e:
+            return {"success": False, "error": f"Failed to cancel render: {e}")
+    
+    def check_render_status(self) -> Dict:
+        """Check if render process is still running"""
+        if not hasattr(self, 'render_process') or not self.render_process:
+            return {"running": False, "pid": None}
+        
+        poll_result = self.render_process.poll()
+        if poll_result is None:
+            # Still running
+            return {"running": True, "pid": self.render_pid}
+        else:
+            # Process finished
+            return {"running": False, "pid": self.render_pid, "exit_code": poll_result}
+    
+    def cleanup(self):
+        """Clean up temporary files and processes"""
+        try:
+            # Cancel any running render process
+            if hasattr(self, 'render_process') and self.render_process:
+                try:
+                    self.render_process.terminate()
+                    self.render_process.wait(timeout=5)
+                except:
+                    try:
+                        self.render_process.kill()
+                    except:
+                        pass
+            
+            # Remove temporary directory
+            import shutil
+            if self.temp_dir.exists():
+                shutil.rmtree(self.temp_dir, ignore_errors=True)
+                print(f"[BRIDGE] Cleaned up temp directory: {self.temp_dir}")
+        except Exception as e:
+            print(f"[BRIDGE] Warning: Cleanup error: {e}")
     
     def cleanup(self):
         """Clean up temporary files"""
@@ -348,6 +451,14 @@ class BlenderTUISession:
     def get_log_file_path(self) -> str:
         """Get the path to the current log file"""
         return self.bridge.get_log_file_path()
+    
+    def cancel_render(self) -> Dict:
+        """Cancel the currently running render process"""
+        return self.bridge.cancel_render()
+    
+    def check_render_status(self) -> Dict:
+        """Check if render process is still running"""
+        return self.bridge.check_render_status()
     
     def cleanup(self):
         """Clean up resources"""
