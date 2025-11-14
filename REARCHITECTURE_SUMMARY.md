@@ -7,20 +7,23 @@ The Blender render automation system has been completely rearchitected with a cl
 ## 🏗️ New Architecture
 
 ### Core Engine (`render_session.py`)
+
 - **RenderSession class**: Stateful session management with all business logic
-- **UI-agnostic design**: Can be controlled by any interface  
+- **UI-agnostic design**: Can be controlled by any interface
 - **Validation & error handling**: Comprehensive checks and user feedback
 - **Flexible workflow**: Change settings in any order, multiple renders without restart
 
 ### User Interfaces
 
 1. **Interactive Shell** (`shell.py`) - **RECOMMENDED**
+
    - CMD-based REPL with tab completion and history
    - Command-driven workflow: `mode fast`, `garment shirt.json`, `render`
    - Built-in help system and status tracking
    - No external dependencies
 
-2. **Textual TUI** (`tui.py`)  
+2. **Textual TUI** (`tui.py`)
+
    - Full graphical TUI with panels, selections, and real-time status
    - Mouse and keyboard navigation
    - Visual feedback and integrated logging
@@ -37,7 +40,7 @@ The Blender render automation system has been completely rearchitected with a cl
 blendomatic/
 ├── render_session.py      # 🔧 Core engine (NEW)
 ├── shell.py              # 💻 Shell interface (NEW)
-├── tui.py                # 🎨 TUI interface (NEW) 
+├── tui.py                # 🎨 TUI interface (NEW)
 ├── main.py               # 🚀 Entry point (NEW)
 ├── demo_session.py       # 🧪 Testing without Blender (NEW)
 ├── demo.py               # 📖 Interactive demo (NEW)
@@ -52,12 +55,13 @@ blendomatic/
 ## 🚀 Usage Examples
 
 ### Shell Interface (Recommended)
+
 ```bash
 python main.py --interface shell
 
 (blendomatic) modes
 - fast
-- prod  
+- prod
 - preview
 
 (blendomatic) mode prod
@@ -72,14 +76,15 @@ python main.py --interface shell
 (blendomatic) fabric hera_white.json
 [INFO] Set fabric: hera_white.json
 
-(blendomatic) asset "Band Collar Variant"  
+(blendomatic) asset "Band Collar Variant"
 [INFO] Set asset: Band Collar Variant
 
 (blendomatic) render
 [RENDER] ✅ Render completed!
 ```
 
-### TUI Interface  
+### TUI Interface
+
 ```bash
 pip install textual
 python main.py --interface tui
@@ -87,6 +92,7 @@ python main.py --interface tui
 ```
 
 ### Original Wizard
+
 ```bash
 python main.py --interface wizard
 # Same linear workflow as before
@@ -95,21 +101,25 @@ python main.py --interface wizard
 ## 🎯 Key Benefits Achieved
 
 ### ✅ Separation of Concerns
+
 - **Engine**: Pure business logic in `RenderSession`
 - **UI**: Multiple interface options without duplicating logic
 - **Testability**: Mock session for development without Blender
 
-### ✅ Enhanced Flexibility  
+### ✅ Enhanced Flexibility
+
 - **Non-linear workflow**: Change settings in any order
 - **Multiple renders**: No need to restart between renders
 - **Session state**: Always know what's configured and what's missing
 
 ### ✅ Better User Experience
+
 - **Rich interfaces**: Shell with completion, TUI with visual feedback
 - **Error handling**: Clear validation messages and status indicators
 - **Progressive disclosure**: Help system, status tracking, command hints
 
 ### ✅ Maintainability
+
 - **Modular design**: Easy to add new features or interfaces
 - **Clean APIs**: Well-defined methods for all operations
 - **Documentation**: Comprehensive help and examples
@@ -127,7 +137,7 @@ python main.py --interface wizard
 The rearchitecture successfully implements:
 
 1. **✅ Core engine separation** - RenderSession class with all business logic
-2. **✅ Multiple UI options** - Shell, TUI, and wizard interfaces  
+2. **✅ Multiple UI options** - Shell, TUI, and wizard interfaces
 3. **✅ Textual TUI implementation** - Rich visual interface as requested
 4. **✅ Flexible workflow** - Change settings in any order, multiple renders
 5. **✅ Backward compatibility** - Original interface still works
