@@ -5,7 +5,8 @@
       "device": "GPU",
       "samples": 4,
       "preview_samples": 2,
-      "adaptive_sampling": true,
+      "adaptive_sampling": false,
+      "adaptive_threshold": 0.1,
       "resolution": {"x": 480, "y": 480, "scale": 100},
       "output_format": "PNG"
     },

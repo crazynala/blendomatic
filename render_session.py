@@ -267,15 +267,31 @@ class RenderSession:
             old_device = getattr(scene.cycles, 'device', 'N/A')
             old_preview = getattr(scene.cycles, 'preview_samples', 'N/A')
             
-            scene.cycles.samples = config.get("samples", 16)
+            # Set all sample-related settings
+            target_samples = config.get("samples", 16)
+            scene.cycles.samples = target_samples
             scene.cycles.use_adaptive_sampling = config.get("adaptive_sampling", True)
             scene.cycles.device = config.get("device", "GPU")
             scene.cycles.preview_samples = config.get("preview_samples", 4)
+            
+            # Force disable adaptive sampling for very low sample counts
+            if target_samples <= 16:
+                scene.cycles.use_adaptive_sampling = False
+                print(f"[RENDER_SETTINGS] Disabling adaptive sampling for fast render ({target_samples} samples)", flush=True)
+            
+            # Also set adaptive threshold if adaptive sampling is enabled
+            if scene.cycles.use_adaptive_sampling:
+                scene.cycles.adaptive_threshold = config.get("adaptive_threshold", 0.01)
+                print(f"[RENDER_SETTINGS] Adaptive threshold: {scene.cycles.adaptive_threshold}", flush=True)
             
             print(f"[RENDER_SETTINGS] Samples: {old_samples} → {scene.cycles.samples}", flush=True)
             print(f"[RENDER_SETTINGS] Adaptive sampling: {old_adaptive} → {scene.cycles.use_adaptive_sampling}", flush=True)
             print(f"[RENDER_SETTINGS] Device: {old_device} → {scene.cycles.device}", flush=True)
             print(f"[RENDER_SETTINGS] Preview samples: {old_preview} → {scene.cycles.preview_samples}", flush=True)
+            
+            # Double-check the values after setting them
+            print(f"[RENDER_SETTINGS] VERIFICATION - Final samples: {scene.cycles.samples}", flush=True)
+            print(f"[RENDER_SETTINGS] VERIFICATION - Final adaptive: {scene.cycles.use_adaptive_sampling}", flush=True)
         
         # Output format
         old_format = scene.render.image_settings.file_format
