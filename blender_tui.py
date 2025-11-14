@@ -9,6 +9,9 @@ try:
     from textual.screen import Screen
     from textual import on
     import asyncio
+    import json
+    from pathlib import Path
+    from typing import Optional, List, Dict, Any
     TEXTUAL_AVAILABLE = True
 except ImportError:
     TEXTUAL_AVAILABLE = False
@@ -30,12 +33,14 @@ except ImportError:
         def decorator(func):
             return func
         return decorator
-    
-    import asyncio
+
+# Constants for file paths
+GARMENTS_DIR = Path("garments")
+FABRICS_DIR = Path("fabrics")
+RENDER_CONFIG_PATH = Path("render_config.json")
 
 from blender_tui_bridge import BlenderTUISession
 import sys
-from typing import Optional
 
 class BlenderTUIApp(App):
     """
@@ -93,6 +98,44 @@ class BlenderTUIApp(App):
         self.garment_list: Optional[SelectionList] = None
         self.fabric_list: Optional[SelectionList] = None
         self.asset_list: Optional[SelectionList] = None
+        
+        # Local data caches
+        self.garment_data: Dict[str, Any] = {}
+        self.current_garment_name: Optional[str] = None
+    
+    def _load_json_file(self, file_path: Path) -> Dict[str, Any]:
+        """Load a JSON file safely"""
+        try:
+            with open(file_path, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            self.write_message(f"❌ Error loading {file_path}: {e}")
+            return {}
+    
+    def _get_local_garments(self) -> List[str]:
+        """Get list of available garment files"""
+        if not GARMENTS_DIR.exists():
+            return []
+        return [f.name for f in GARMENTS_DIR.glob("*.json")]
+    
+    def _get_local_fabrics(self) -> List[str]:
+        """Get list of available fabric files"""
+        if not FABRICS_DIR.exists():
+            return []
+        return [f.name for f in FABRICS_DIR.glob("*.json")]
+    
+    def _get_garment_assets(self, garment_name: str) -> List[str]:
+        """Get assets for a specific garment from local file"""
+        if not garment_name:
+            return []
+            
+        garment_path = GARMENTS_DIR / garment_name
+        if not garment_path.exists():
+            return []
+            
+        garment_data = self._load_json_file(garment_path)
+        assets = garment_data.get("assets", [])
+        return [asset.get("name", "") for asset in assets if asset.get("name")]
     
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -138,22 +181,28 @@ class BlenderTUIApp(App):
     
     async def on_mount(self):
         """Initialize the session when app starts"""
-        self.write_message("🚀 Initializing Blender TUI Bridge...")
+        self.write_message("🚀 Initializing Blender TUI...")
         
+        # Always load local file data (garments, fabrics) regardless of bridge status
+        await self.refresh_all_lists()
+        
+        # Try to initialize Blender bridge (for modes and actual rendering)
         try:
-            # Initialize session in a separate thread to avoid blocking
+            self.write_message("🔗 Connecting to Blender bridge...")
             self.session = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: BlenderTUISession(self.blender_exe)
             )
             
-            self.write_message("✅ Bridge initialized successfully")
+            self.write_message("✅ Blender bridge connected")
+            # Refresh again to get modes from bridge
             await self.refresh_all_lists()
             await self.update_status()
             
         except Exception as e:
-            self.write_message(f"❌ Failed to initialize bridge: {e}")
+            self.write_message(f"⚠️  Blender bridge unavailable: {e}")
+            self.write_message("📁 Running in file-only mode (no rendering)")
             if self.status_display:
-                self.status_display.update(f"Error: {e}")
+                self.status_display.update("File-only mode - Blender bridge unavailable")
     
     def write_message(self, message: str):
         """Write message to the message display (avoiding 'log' method name)"""
@@ -166,23 +215,28 @@ class BlenderTUIApp(App):
     
     async def refresh_all_lists(self):
         """Refresh all selection lists"""
-        if not self.session:
-            return
-        
         try:
-            # Get data from Blender
-            modes = await asyncio.get_event_loop().run_in_executor(
-                None, self.session.list_modes
-            )
+            # Get modes from Blender bridge (only modes need Blender)
+            modes = []
+            if self.session:
+                modes = await asyncio.get_event_loop().run_in_executor(
+                    None, self.session.list_modes
+                )
+            
+            # Get garments and fabrics from local files (no Blender needed)
             garments = await asyncio.get_event_loop().run_in_executor(
-                None, self.session.list_garments  
+                None, self._get_local_garments
             )
             fabrics = await asyncio.get_event_loop().run_in_executor(
-                None, self.session.list_fabrics
+                None, self._get_local_fabrics
             )
-            assets = await asyncio.get_event_loop().run_in_executor(
-                None, self.session.list_assets
-            )
+            
+            # Get assets for current garment (if any)
+            assets = []
+            if self.current_garment_name:
+                assets = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self._get_garment_assets(self.current_garment_name)
+                )
             
             # Update lists
             if self.mode_list:
@@ -205,26 +259,38 @@ class BlenderTUIApp(App):
                 for asset in assets:
                     self.asset_list.add_option((asset, asset))
             
-            self.write_message("📋 Lists refreshed")
+            # Debug info about loaded data
+            self.write_message(f"📋 Lists refreshed - Modes: {len(modes)}, Garments: {len(garments)}, Fabrics: {len(fabrics)}, Assets: {len(assets)}")
+            if assets:
+                self.write_message(f"Available assets: {', '.join(assets)}")
+            else:
+                self.write_message("No assets loaded (garment must be selected first)")
             
         except Exception as e:
             self.write_message(f"❌ Failed to refresh lists: {e}")
     
     async def refresh_assets_list(self):
         """Refresh only the assets list (called after garment selection)"""
-        if not self.session or not self.asset_list:
+        if not self.asset_list:
             return
         
         try:
-            assets = await asyncio.get_event_loop().run_in_executor(
-                None, self.session.list_assets
-            )
+            # Get assets from local garment file (no bridge needed)
+            assets = []
+            if self.current_garment_name:
+                assets = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self._get_garment_assets(self.current_garment_name)
+                )
             
             self.asset_list.clear_options()
             for asset in assets:
                 self.asset_list.add_option((asset, asset))
             
-            self.write_message(f"🎯 Assets refreshed ({len(assets)} available)")
+            # Debug info
+            if assets:
+                self.write_message(f"🎯 Assets refreshed ({len(assets)} available): {', '.join(assets)}")
+            else:
+                self.write_message("🎯 No assets available (select a garment first)")
             
         except Exception as e:
             self.write_message(f"❌ Failed to refresh assets: {e}")
@@ -283,9 +349,15 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
         self.write_message(f"👔 Setting garment: {garment}")
         
         try:
-            await asyncio.get_event_loop().run_in_executor(
-                None, lambda: self.session.set_garment(garment)
-            )
+            # Update current garment name for asset loading
+            self.current_garment_name = garment
+            
+            # Set garment in Blender bridge (if available)
+            if self.session:
+                await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self.session.set_garment(garment)
+                )
+            
             self.write_message(f"✅ Garment set: {garment}")
             await self.update_status()
             # Refresh assets list since it depends on the selected garment
