@@ -300,7 +300,13 @@ except Exception as e:
         self.render_process = process
         self.render_pid = process.pid
         
+        # Write PID file for tracking orphaned processes
+        pid_file = self.temp_dir / f"render_{process.pid}.pid"
+        with open(pid_file, 'w') as f:
+            f.write(f"{process.pid}\n{args}\n")
+        
         print(f"[BRIDGE] Render started with PID: {process.pid}")
+        print(f"[BRIDGE] PID file: {pid_file}")
         print(f"[BRIDGE] Logging to: {render_log_file}")
         
         # Return immediately - render runs in background
@@ -309,6 +315,7 @@ except Exception as e:
             "result": f"Render started (PID: {process.pid})",
             "pid": process.pid,
             "log_file": str(render_log_file),
+            "pid_file": str(pid_file),
             "detached": True
         }
     
@@ -352,13 +359,26 @@ except Exception as e:
             # Cancel any running render process
             if hasattr(self, 'render_process') and self.render_process:
                 try:
+                    print(f"[BRIDGE] Terminating render process PID: {self.render_pid}")
                     self.render_process.terminate()
                     self.render_process.wait(timeout=5)
-                except:
+                    print(f"[BRIDGE] Render process terminated gracefully")
+                except subprocess.TimeoutExpired:
                     try:
+                        print(f"[BRIDGE] Force killing render process PID: {self.render_pid}")
                         self.render_process.kill()
+                        print(f"[BRIDGE] Render process killed")
                     except:
-                        pass
+                        print(f"[BRIDGE] Warning: Could not kill render process PID: {self.render_pid}")
+                except Exception as e:
+                    print(f"[BRIDGE] Warning: Error terminating render process: {e}")
+            
+            # Clean up PID files for orphan tracking
+            try:
+                for pid_file in self.temp_dir.glob("render_*.pid"):
+                    pid_file.unlink()
+            except Exception as e:
+                print(f"[BRIDGE] Warning: Error cleaning PID files: {e}")
             
             # Remove temporary directory
             import shutil

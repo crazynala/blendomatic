@@ -700,8 +700,34 @@ class BlenderTUIApp(App):
     
     async def on_unmount(self):
         """Clean up when app closes"""
+        self.write_message("🔄 Cleaning up...")
+        
+        # Cancel any active render monitoring
+        if self.current_render_task:
+            self.current_render_task.cancel()
+        
+        if self.current_log_task:
+            self.current_log_task.cancel()
+        
+        # Note: We don't kill the render process here since it should continue
+        # running independently. Use cleanup_renders.py to manage orphans.
+        if self.render_pid:
+            self.write_message(f"📋 Render PID {self.render_pid} will continue in background")
+            self.write_message("💡 Use cleanup_renders.py to manage background renders")
+        
         if self.session:
-            self.session.cleanup()
+            # Clean up bridge resources but don't kill render process
+            try:
+                # Temporarily remove render process so cleanup() doesn't kill it
+                if hasattr(self.session.bridge, 'render_process'):
+                    temp_process = self.session.bridge.render_process
+                    self.session.bridge.render_process = None
+                    self.session.cleanup()
+                    self.session.bridge.render_process = temp_process
+                else:
+                    self.session.cleanup()
+            except Exception as e:
+                self.write_message(f"⚠️ Cleanup warning: {e}")
 
 
 def main():
