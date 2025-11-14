@@ -380,9 +380,9 @@ class RenderSession:
         
         # Shadow catcher configuration
         shadow_catcher_enabled = mesh_config.get("shadow_catcher", False)
-        if hasattr(obj, 'cycles') and hasattr(obj.cycles, 'is_shadow_catcher'):
-            obj.cycles.is_shadow_catcher = shadow_catcher_enabled
-            print(f"[MESH_CONFIG]   shadow_catcher: {shadow_catcher_enabled} (is_shadow_catcher: {obj.cycles.is_shadow_catcher})", flush=True)
+        if hasattr(obj, 'is_shadow_catcher'):
+            obj.is_shadow_catcher = shadow_catcher_enabled
+            print(f"[MESH_CONFIG]   shadow_catcher: {shadow_catcher_enabled} (is_shadow_catcher: {obj.is_shadow_catcher})", flush=True)
         elif hasattr(obj, 'cycles'):
             print(f"[WARN] Object {obj.name} cycles properties don't support is_shadow_catcher (Blender version issue?)", flush=True)
             print(f"[MESH_CONFIG]   shadow_catcher: {shadow_catcher_enabled} (NOT APPLIED - unsupported)", flush=True)
