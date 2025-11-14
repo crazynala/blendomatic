@@ -496,7 +496,7 @@ class BlenderTUIApp(App):
         
         while True:
             try:
-                await asyncio.sleep(0.5)  # Check every 0.5 seconds
+                await asyncio.sleep(1.0)  # Check every 1 second
                 
                 if Path(log_file_path).exists():
                     with open(log_file_path, 'r') as f:
@@ -643,7 +643,7 @@ class BlenderTUIApp(App):
                     break
                 
                 # Still running, wait before checking again
-                await asyncio.sleep(5)  # Check every 5 seconds
+                await asyncio.sleep(10)  # Check every 10 seconds
                 
         except asyncio.CancelledError:
             # Task was cancelled (user clicked cancel)

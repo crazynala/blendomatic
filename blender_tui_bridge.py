@@ -257,17 +257,38 @@ except Exception as e:
         """Execute render command in detached subprocess"""
         print(f"[BRIDGE] Starting detached render process")
         
+        # Create dedicated config and result files for render to avoid conflicts
+        render_config_file = self.temp_dir / "render_config.json"
+        render_result_file = self.temp_dir / "render_result.json" 
+        render_log_file = self.temp_dir / "render.log"
+        
+        # Write render configuration to dedicated file
+        config = {
+            'command': command,
+            'args': args
+        }
+        with open(render_config_file, 'w') as f:
+            json.dump(config, f)
+        
+        # Create dedicated command for render
+        render_cmd = [
+            self.blender_exe,
+            "--background", 
+            "--python", str(self.script_file),
+            "--", str(render_config_file), str(render_result_file)
+        ]
+        
         # Clear/create log file
-        with open(self.log_file, 'w') as f:
+        with open(render_log_file, 'w') as f:
             f.write(f"[BRIDGE] Starting detached command: {command}\n")
             f.write(f"[BRIDGE] Args: {args}\n")
-            f.write(f"[BRIDGE] Command: {' '.join(cmd)}\n")
+            f.write(f"[BRIDGE] Command: {' '.join(render_cmd)}\n")
             f.write("-" * 50 + "\n")
         
         # Start subprocess in detached mode
-        with open(self.log_file, 'a') as log_f:
+        with open(render_log_file, 'a') as log_f:
             process = subprocess.Popen(
-                cmd,
+                render_cmd,
                 stdout=log_f,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -280,14 +301,14 @@ except Exception as e:
         self.render_pid = process.pid
         
         print(f"[BRIDGE] Render started with PID: {process.pid}")
-        print(f"[BRIDGE] Logging to: {self.log_file}")
+        print(f"[BRIDGE] Logging to: {render_log_file}")
         
         # Return immediately - render runs in background
         return {
             "success": True, 
             "result": f"Render started (PID: {process.pid})",
             "pid": process.pid,
-            "log_file": str(self.log_file),
+            "log_file": str(render_log_file),
             "detached": True
         }
     
