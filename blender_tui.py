@@ -102,6 +102,12 @@ class BlenderTUIApp(App):
         # Local data caches
         self.garment_data: Dict[str, Any] = {}
         self.current_garment_name: Optional[str] = None
+        
+        # Local selections (work without Blender bridge)
+        self.selected_mode: Optional[str] = None
+        self.selected_garment: Optional[str] = None  
+        self.selected_fabric: Optional[str] = None
+        self.selected_asset: Optional[str] = None
     
     def _load_json_file(self, file_path: Path) -> Dict[str, Any]:
         """Load a JSON file safely"""
@@ -136,6 +142,41 @@ class BlenderTUIApp(App):
         garment_data = self._load_json_file(garment_path)
         assets = garment_data.get("assets", [])
         return [asset.get("name", "") for asset in assets if asset.get("name")]
+    
+    async def sync_selections_to_blender(self):
+        """Sync local selections to Blender session (when bridge becomes available)"""
+        if not self.session:
+            return
+        
+        try:
+            if self.selected_mode:
+                self.write_message(f"🔄 Syncing mode to Blender: {self.selected_mode}")
+                await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self.session.set_mode(self.selected_mode)
+                )
+            
+            if self.selected_garment:
+                self.write_message(f"🔄 Syncing garment to Blender: {self.selected_garment}")
+                await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self.session.set_garment(self.selected_garment)
+                )
+            
+            if self.selected_fabric:
+                self.write_message(f"🔄 Syncing fabric to Blender: {self.selected_fabric}")
+                await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self.session.set_fabric(self.selected_fabric)
+                )
+            
+            if self.selected_asset:
+                self.write_message(f"🔄 Syncing asset to Blender: {self.selected_asset}")
+                await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self.session.set_asset(self.selected_asset)
+                )
+                
+            self.write_message("✅ All selections synced to Blender")
+            
+        except Exception as e:
+            self.write_message(f"❌ Failed to sync selections: {e}")
     
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -196,6 +237,8 @@ class BlenderTUIApp(App):
             self.write_message("✅ Blender bridge connected")
             # Refresh again to get modes from bridge
             await self.refresh_all_lists()
+            # Sync any local selections to Blender
+            await self.sync_selections_to_blender()
             await self.update_status()
             
         except Exception as e:
@@ -340,7 +383,8 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
     
     @on(Button.Pressed, "#set_garment_btn")
     async def set_garment(self):
-        if not self.session or not self.garment_list or not self.garment_list.selected:
+        if not self.garment_list or not self.garment_list.selected:
+            self.write_message("❌ Please select a garment first")
             return
         
         # Handle both single value and list selection
@@ -349,14 +393,19 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
         self.write_message(f"👔 Setting garment: {garment}")
         
         try:
-            # Update current garment name for asset loading
+            # Always update local state
             self.current_garment_name = garment
+            self.selected_garment = garment
             
             # Set garment in Blender bridge (if available)
             if self.session:
+                self.write_message("🔗 Updating garment in Blender session...")
                 await asyncio.get_event_loop().run_in_executor(
                     None, lambda: self.session.set_garment(garment)
                 )
+                self.write_message("✅ Garment updated in Blender session")
+            else:
+                self.write_message("📁 Garment set locally (Blender sync pending)")
             
             self.write_message(f"✅ Garment set: {garment}")
             await self.update_status()
@@ -386,7 +435,13 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
     
     @on(Button.Pressed, "#set_asset_btn")
     async def set_asset(self):
-        if not self.session or not self.asset_list or not self.asset_list.selected:
+        if not self.asset_list or not self.asset_list.selected:
+            self.write_message("❌ Please select an asset first")
+            return
+        
+        # Check if garment is set locally
+        if not self.current_garment_name:
+            self.write_message("❌ Please select a garment first")
             return
         
         # Handle both single value and list selection
@@ -395,13 +450,32 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
         self.write_message(f"🎯 Setting asset: {asset}")
         
         try:
-            await asyncio.get_event_loop().run_in_executor(
-                None, lambda: self.session.set_asset(asset)
-            )
-            self.write_message(f"✅ Asset set: {asset}")
+            # Always update local state
+            self.selected_asset = asset
+            
+            # Set asset in Blender bridge (if available)
+            if self.session:
+                # Make sure garment is set in Blender first
+                if self.selected_garment:
+                    await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: self.session.set_garment(self.selected_garment)
+                    )
+                
+                await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self.session.set_asset(asset)
+                )
+                self.write_message(f"✅ Asset set in Blender: {asset}")
+            else:
+                self.write_message(f"📁 Asset set locally: {asset} (Blender sync pending)")
+            
             await self.update_status()
         except Exception as e:
             self.write_message(f"❌ Failed to set asset: {e}")
+            # Additional debugging info
+            if "Select a garment first" in str(e):
+                self.write_message("💡 Hint: The garment may not be properly set in Blender session")
+                self.write_message(f"   Local garment: {self.current_garment_name}")
+                self.write_message("   Try selecting the garment again")
     
     @on(Button.Pressed, "#render_btn")
     async def render(self):
