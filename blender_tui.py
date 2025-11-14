@@ -56,21 +56,18 @@ class BlenderTUIApp(App):
     CSS = """
     .left_column {
         width: 25%;
-        border: solid green;
         margin: 0 1 1 0;
         padding: 1;
     }
     
     .middle_column {
         width: 35%;
-        border: solid blue;  
         margin: 0 1 1 0;
         padding: 1;
     }
     
     .right_column {
         width: 40%;
-        border: solid purple;
         margin: 0 0 1 0;
         padding: 1;
     }
@@ -78,22 +75,22 @@ class BlenderTUIApp(App):
     .controls_row {
         height: 6;
         margin: 0 0 1 0;
-        border: solid yellow;
         padding: 1;
-        display: block;
+        border-top: solid white;
     }
     
     .timeout_config {
-        width: 30%;
+        width: 40%;
         margin: 0 1 0 0;
+        padding: 0 1 0 0;
     }
     
     .message_panel {
         dock: bottom;
         height: 35%;
-        border: solid white;
         margin: 1;
         padding: 1;
+        border-top: solid white;
     }
     
     SelectionList {
@@ -104,12 +101,14 @@ class BlenderTUIApp(App):
     
     Button {
         height: 3;
-        margin: 0;
+        margin: 0 1 0 0;
+        width: 15;
     }
     
     Input {
         height: 1;
-        margin: 0;
+        margin: 0 0 1 0;
+        width: 10;
     }
     
     Checkbox {
@@ -130,6 +129,8 @@ class BlenderTUIApp(App):
         self.asset_list: Optional[SelectionList] = None
         self.timeout_checkbox: Optional[Checkbox] = None
         self.timeout_input: Optional[Input] = None
+        self.render_button: Optional[Button] = None
+        self.cancel_button: Optional[Button] = None
         
         # Local data caches
         self.garment_data: Dict[str, Any] = {}
@@ -144,6 +145,10 @@ class BlenderTUIApp(App):
         # Timeout configuration
         self.timeout_enabled: bool = True
         self.timeout_seconds: int = 600  # Default 10 minutes
+        
+        # Rendering state
+        self.is_rendering: bool = False
+        self.current_render_task: Optional[asyncio.Task] = None
     
     def _load_json_file(self, file_path: Path) -> Dict[str, Any]:
         """Load a JSON file safely"""
@@ -241,13 +246,17 @@ class BlenderTUIApp(App):
             
             # Bottom section: Timeout config and render controls
             with Horizontal(classes="controls_row"):
-                with Vertical(classes="timeout_config"):
+                with Horizontal(classes="timeout_config"):
                     self.timeout_checkbox = Checkbox("Use timeout", value=True, id="timeout_checkbox")
                     yield self.timeout_checkbox
-                    self.timeout_input = Input(value="600", placeholder="Seconds", id="timeout_input")
+                    self.timeout_input = Input(value="600", placeholder="Timeout (s)", id="timeout_input")
                     yield self.timeout_input
                 
-                yield Button("🎬 RENDER", id="render_btn", variant="success")
+                self.render_button = Button("🎬 RENDER", id="render_btn", variant="success")
+                yield self.render_button
+                self.cancel_button = Button("❌ CANCEL", id="cancel_btn", variant="error")
+                self.cancel_button.display = False  # Hidden by default
+                yield self.cancel_button
             
             # Message panel
             with Container(classes="message_panel"):
@@ -482,6 +491,13 @@ class BlenderTUIApp(App):
     
     @on(Button.Pressed, "#render_btn")
     async def render(self):
+        if self.is_rendering:
+            return  # Already rendering
+            
+        self.is_rendering = True
+        self.render_button.display = False
+        self.cancel_button.display = True
+        
         self.write_message("🎬 Starting render...")
         
         try:
@@ -520,10 +536,16 @@ class BlenderTUIApp(App):
             # Start log tailing
             log_task = asyncio.create_task(self.tail_log_file(log_file_path))
             
-            try:
-                output_path = await asyncio.get_event_loop().run_in_executor(
+            # Create render task
+            render_task = asyncio.create_task(
+                asyncio.get_event_loop().run_in_executor(
                     None, lambda: self.session.render_with_config(config)
                 )
+            )
+            self.current_render_task = render_task
+            
+            try:
+                output_path = await render_task
             finally:
                 # Cancel log tailing
                 log_task.cancel()
@@ -541,6 +563,34 @@ class BlenderTUIApp(App):
             self.write_message(f"❌ Configuration error: {e}")
         except Exception as e:
             self.write_message(f"❌ Render failed: {e}")
+        finally:
+            # Reset render state
+            self.is_rendering = False
+            self.render_button.display = True
+            self.cancel_button.display = False
+            self.current_render_task = None
+    
+    @on(Button.Pressed, "#cancel_btn")
+    async def cancel_render(self):
+        if not self.is_rendering:
+            return
+            
+        self.write_message("❌ Cancelling render...")
+        
+        if self.current_render_task:
+            self.current_render_task.cancel()
+            try:
+                await self.current_render_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Reset state
+        self.is_rendering = False
+        self.render_button.display = True
+        self.cancel_button.display = False
+        self.current_render_task = None
+        
+        self.write_message("🛑 Render cancelled")
     
     async def on_unmount(self):
         """Clean up when app closes"""

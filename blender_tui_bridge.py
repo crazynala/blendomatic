@@ -95,27 +95,29 @@ try:
         elif command == 'render_with_config':
             # Configure everything at once then render
             config_data = args
-            print(f"[RENDER_CONFIG] Starting with config: {config_data}")
+            print(f"[RENDER_CONFIG] 🚀 Starting render with full config")
+            print(f"[RENDER_CONFIG] Config keys: {list(config_data.keys())}")
+            print(f"[RENDER_CONFIG] Full config: {json.dumps(config_data, indent=2)}")
             
-            print("[RENDER_CONFIG] Setting mode...")
+            print(f"[RENDER_CONFIG] 🔧 Setting mode: {config_data['mode']}")
             session.set_mode(config_data['mode'])
-            print(f"[RENDER_CONFIG] Mode set: {config_data['mode']}")
+            print(f"[RENDER_CONFIG] ✅ Mode '{config_data['mode']}' applied")
             
-            print("[RENDER_CONFIG] Setting garment...")
+            print(f"[RENDER_CONFIG] 👔 Setting garment: {config_data['garment']}")
             session.set_garment(config_data['garment'])
-            print(f"[RENDER_CONFIG] Garment set: {config_data['garment']}")
+            print(f"[RENDER_CONFIG] ✅ Garment '{config_data['garment']}' loaded")
             
-            print("[RENDER_CONFIG] Setting fabric...")
+            print(f"[RENDER_CONFIG] 🧵 Setting fabric: {config_data['fabric']}")
             session.set_fabric(config_data['fabric'])
-            print(f"[RENDER_CONFIG] Fabric set: {config_data['fabric']}")
+            print(f"[RENDER_CONFIG] ✅ Fabric '{config_data['fabric']}' applied")
             
-            print("[RENDER_CONFIG] Setting asset...")
+            print(f"[RENDER_CONFIG] 🎯 Setting asset: {config_data['asset']}")
             session.set_asset(config_data['asset'])
-            print(f"[RENDER_CONFIG] Asset set: {config_data['asset']}")
+            print(f"[RENDER_CONFIG] ✅ Asset '{config_data['asset']}' loaded")
             
-            print("[RENDER_CONFIG] Starting render...")
+            print("[RENDER_CONFIG] 🎬 Starting render process...")
             output_path = session.render()
-            print(f"[RENDER_CONFIG] Render completed: {output_path}")
+            print(f"[RENDER_CONFIG] 🎉 Render completed successfully: {output_path}")
             result['result'] = output_path
         else:
             result['error'] = f'Unknown command: {command}'
