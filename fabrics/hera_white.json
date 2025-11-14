@@ -8,7 +8,7 @@
   },
   "material_params": {
     "metallic": 0.0,
-    "roughness": 0.45,
+    "roughness": 0.1,
     "alpha": 1.0
   }
 }

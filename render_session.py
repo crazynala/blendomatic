@@ -160,23 +160,22 @@ class RenderSession:
         print(f"[INFO] Set garment: {self.garment['name']}")
     
     def set_fabric(self, fabric_name: str) -> None:
-        """Set fabric and apply material"""
+        """Set fabric and update existing materials"""
         match = next((f for f in self.fabrics if f.name == fabric_name), None)
         if not match:
             available = ", ".join(self.list_fabrics())
             raise ValueError(f"Unknown fabric '{fabric_name}'. Available: {available}")
         
         self.fabric = self._load_json(match)
+        
+        # Update existing materials in the Blender file with fabric textures
         self.material = self._apply_fabric_material(self.fabric)
         
-        # Apply material to all mesh objects
-        for obj in bpy.data.objects:
-            if obj.type == "MESH":
-                for slot in obj.material_slots:
-                    slot.material = self.material
+        # The materials are already assigned to objects in the Blender file,
+        # so we don't need to reassign them - just update their textures
         
         self._fabric_applied = True
-        print(f"[INFO] Set fabric: {self.fabric['name']}")
+        print(f"[FABRIC] ✅ Fabric '{self.fabric['name']}' applied to existing materials")
     
     def set_asset(self, asset_name: str) -> None:
         """Set asset and configure mesh objects"""
@@ -302,45 +301,70 @@ class RenderSession:
         print(f"[RENDER_SETTINGS] ✅ All render settings applied successfully", flush=True)
     
     def _apply_fabric_material(self, fabric: Dict):
-        """Create and assign material based on fabric config"""
-        mat_name = f"MAT_{fabric['name']}"
-        if mat_name in bpy.data.materials:
-            return bpy.data.materials[mat_name]
+        """Update existing materials in the Blender file with fabric textures"""
+        print(f"[FABRIC] Applying fabric '{fabric['name']}' to existing materials")
         
-        mat = bpy.data.materials.new(name=mat_name)
-        mat.use_nodes = True
-        nodes = mat.node_tree.nodes
-        links = mat.node_tree.links
-        bsdf = nodes.get("Principled BSDF")
+        # Get fabric texture paths
+        textures = fabric.get("textures", {})
+        material_params = fabric.get("material_params", {})
         
-        def add_tex_node(label, path, output_socket):
-            if not os.path.exists(path):
-                print(f"[WARN] Missing texture: {path}")
-                return
-            tex = nodes.new(type="ShaderNodeTexImage")
-            tex.image = bpy.data.images.load(path)
-            tex.label = label
-            links.new(tex.outputs["Color"], bsdf.inputs[output_socket])
+        print(f"[FABRIC] Available textures: {list(textures.keys())}")
+        print(f"[FABRIC] Material params: {material_params}")
         
-        texs = fabric.get("textures", {})
-        if "base_color" in texs:
-            add_tex_node("BaseColor", texs["base_color"], "Base Color")
-        if "roughness" in texs:
-            add_tex_node("Roughness", texs["roughness"], "Roughness")
-        if "normal" in texs:
-            normal_map = nodes.new(type="ShaderNodeNormalMap")
-            tex = nodes.new(type="ShaderNodeTexImage")
-            tex.image = bpy.data.images.load(texs["normal"])
-            links.new(tex.outputs["Color"], normal_map.inputs["Color"])
-            links.new(normal_map.outputs["Normal"], bsdf.inputs["Normal"])
+        # Find and update existing materials
+        materials_updated = []
+        for mat in bpy.data.materials:
+            if not mat.use_nodes:
+                print(f"[FABRIC] Skipping material '{mat.name}' - no node tree")
+                continue
+                
+            print(f"[FABRIC] Updating material: {mat.name}")
+            nodes = mat.node_tree.nodes
+            
+            # Update texture nodes by looking for Image Texture nodes with specific labels or names
+            for node in nodes:
+                if node.type == 'TEX_IMAGE':
+                    # Check if this is a texture node we should update based on label or name
+                    node_label = node.label.lower() if node.label else ""
+                    node_name = node.name.lower()
+                    
+                    # Update base color texture
+                    if any(keyword in node_label or keyword in node_name for keyword in ['base', 'color', 'diffuse', 'albedo']):
+                        if "base_color" in textures and os.path.exists(textures["base_color"]):
+                            print(f"[FABRIC]   Loading base color texture: {textures['base_color']}")
+                            node.image = bpy.data.images.load(textures["base_color"])
+                    
+                    # Update roughness texture
+                    elif any(keyword in node_label or keyword in node_name for keyword in ['roughness', 'rough']):
+                        if "roughness" in textures and os.path.exists(textures["roughness"]):
+                            print(f"[FABRIC]   Loading roughness texture: {textures['roughness']}")
+                            node.image = bpy.data.images.load(textures["roughness"])
+                    
+                    # Update normal texture
+                    elif any(keyword in node_label or keyword in node_name for keyword in ['normal', 'norm']):
+                        if "normal" in textures and os.path.exists(textures["normal"]):
+                            print(f"[FABRIC]   Loading normal texture: {textures['normal']}")
+                            node.image = bpy.data.images.load(textures["normal"])
+            
+            # Update Principled BSDF parameters if available
+            bsdf = nodes.get("Principled BSDF")
+            if bsdf:
+                if "metallic" in material_params:
+                    bsdf.inputs["Metallic"].default_value = material_params["metallic"]
+                    print(f"[FABRIC]   Set metallic: {material_params['metallic']}")
+                if "roughness" in material_params:
+                    bsdf.inputs["Roughness"].default_value = material_params["roughness"]
+                    print(f"[FABRIC]   Set roughness: {material_params['roughness']}")
+                if "alpha" in material_params:
+                    bsdf.inputs["Alpha"].default_value = material_params["alpha"]
+                    print(f"[FABRIC]   Set alpha: {material_params['alpha']}")
+            
+            materials_updated.append(mat.name)
         
-        p = fabric.get("material_params", {})
-        bsdf.inputs["Metallic"].default_value = p.get("metallic", 0.0)
-        bsdf.inputs["Roughness"].default_value = p.get("roughness", 0.5)
-        bsdf.inputs["Alpha"].default_value = p.get("alpha", 1.0)
+        print(f"[FABRIC] Updated {len(materials_updated)} materials: {materials_updated}")
         
-        print(f"[INFO] Created material {mat_name}")
-        return mat
+        # Return the first updated material, or None if no materials were found
+        return bpy.data.materials[materials_updated[0]] if materials_updated else None
     
     def _configure_mesh_object(self, mesh_config: Dict) -> None:
         """Configure individual mesh object based on config"""

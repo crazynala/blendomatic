@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Render output files
+renders/
+
 # C extensions
 *.so
 
