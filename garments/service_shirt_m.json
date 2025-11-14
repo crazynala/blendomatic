@@ -1,0 +1,173 @@
+{
+  "name": "Service Shirt (M)",
+  "blend_file": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Shadow Catcher Cozuldu.blend",
+  "output_prefix": "service_shirt_M",
+  "assets": [
+    {
+      "name": "Band Collar Variant",
+      "suffix": "band_collar",
+      "meshes": [
+        {
+          "name": "Band Collar",
+		  "show_in_viewport": true,
+          "render": true,
+          "holdout": false,
+          "shadow_catcher": false
+        },
+        {
+          "name": "Body LS.002",
+          "render": false
+        },
+        {
+          "name": "Body SS",
+          "render": true,
+		  "show_in_viewport": false,
+          "holdout": false,
+          "shadow_catcher": true
+        },
+        {
+          "name": "Reg Collar",
+          "render": false,
+		  
+        },
+        {
+          "name": "Placket",
+          "render": true,
+		  "show_in_viewport": false,
+          "holdout": true,
+          "shadow_catcher": true
+        }
+        
+      ]
+    },
+    {
+        "name": "Regular Collar Variant",
+        "suffix": "reg_collar",
+        "meshes": [
+          {
+            "name": "Band Collar",
+            "render": false
+          },
+          {
+            "name": "Body LS.002",
+            "render": false
+          },
+          {
+            "name": "Body SS",
+            "render": true,
+            "holdout": false,
+            "shadow_catcher": true
+          },
+          {
+            "name": "Reg Collar",
+            "render": true,
+            "holdout": false,
+            "shadow_catcher": false
+          },
+          {
+            "name": "Placket",
+            "render": true,
+            "holdout": false,
+            "shadow_catcher": true
+          }]},
+	      {
+	          "name": "Body Long Sleeve Variant",
+	          "suffix": "Body_LS",
+	          "meshes": [
+	            {
+	              "name": "Band Collar",
+	    		  "show_in_viewport": false,
+	              
+	            },
+	            {
+	              "name": "Body LS.002",
+	              "render": true,
+	    		  "show_in_viewport": true,
+	              "holdout": false,
+	              "shadow_catcher": false
+	            },
+	            {
+	              "name": "Body SS",
+	              "render": false,
+	    		  
+	            },
+	            {
+	              "name": "Reg Collar",
+	  			"show_in_viewport": false,
+	              
+	            },
+	            {
+	              "name": "Placket",
+	              "render": false,
+	    		  
+	            }]},
+	  	      {
+	  	          "name": "Body Short Sleeve Variant",
+	  	          "suffix": "Body_SS",
+	  	          "meshes": [
+	  	            {
+	  	              "name": "Band Collar",
+	  	    		  "show_in_viewport": false,
+	  	             
+	  	            },
+	  	            {
+	  	              "name": "Body LS.002",
+	  	              "render": false,
+	  	    		  
+	  	            },
+	  	            {
+	  	              "name": "Body SS",
+	  	              "render": true,
+	  	    		  "show_in_viewport": true,
+	  	              "holdout": false,
+	  	              "shadow_catcher":false
+	  	            },
+	  	            {
+	  	              "name": "Reg Collar",
+	  	  			"show_in_viewport": false,
+	  	             
+	  	            },
+	  	            {
+	  	              "name": "Placket",
+	  	              "render": false,
+	  	    		  
+	  	            }]},
+	  	  	      
+	  	  	  	      {
+	  	  	  	          "name": "Placket Variant",
+	  	  	  	          "suffix": "placket",
+	  	  	  	          "meshes": [
+	  	  	  	            {
+	  	  	  	              "name": "Band Collar",
+	  	  	  	    		  "show_in_viewport": false,
+	  	  	  	             
+	  	  	  	            },
+	  	  	  	            {
+	  	  	  	              "name": "Body LS.002",
+	  	  	  	              "render": false,
+	  	  	  	    		  
+	  	  	  	            },
+	  	  	  	            {
+	  	  	  	              "name": "Body SS",
+	  	  	  	              "render": true,
+	  	  	  	    		  "show_in_viewport": false,
+	  	  	  	              "holdout": false,
+	  	  	  	              "shadow_catcher":true
+	  	  	  	            },
+	  	  	  	            {
+	  	  	  	              "name": "Reg Collar",
+	  	  	  	  			"show_in_viewport": false,
+	  	  	  	              
+	  	  	  	            },
+	  	  	  	            {
+	  	  	  	              "name": "Placket",
+	  	  	  	              "render": true,
+	  	  	  	    		  "show_in_viewport": true,
+	  	  	  	              "holdout": false,
+	  	  	  	              "shadow_catcher": false
+	  	  	  	            }
+		  
+      ]
+    }
+  ]
+}

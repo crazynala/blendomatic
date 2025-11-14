@@ -1,0 +1,31 @@
+{
+  "modes": {
+    "fast": {
+      "engine": "CYCLES",
+      "device": "GPU",
+      "samples": 4,
+      "preview_samples": 2,
+      "adaptive_sampling": true,
+      "resolution": {"x": 640, "y": 360, "scale": 50},
+      "output_format": "PNG"
+    },
+    "prod": {
+      "engine": "CYCLES",
+      "device": "GPU",
+      "samples": 256,
+      "preview_samples": 64,
+      "adaptive_sampling": true,
+      "resolution": {"x": 1920, "y": 1080, "scale": 100},
+      "output_format": "PNG"
+    },
+    "preview": {
+      "engine": "BLENDER_EEVEE_NEXT",
+      "device": "GPU",
+      "samples": 16,
+      "preview_samples": 8,
+      "adaptive_sampling": false,
+      "resolution": {"x": 1280, "y": 720, "scale": 50},
+      "output_format": "PNG"
+    }
+  }
+}
