@@ -297,7 +297,6 @@ except Exception as e:
             return {"success": False, "error": "No render process to cancel"}
         
         try:
-            import signal
             # Try graceful shutdown first
             self.render_process.terminate()
             
@@ -311,7 +310,7 @@ except Exception as e:
                 return {"success": True, "result": "Render force-cancelled"}
                 
         except Exception as e:
-            return {"success": False, "error": f"Failed to cancel render: {e}")
+            return {"success": False, "error": "Failed to cancel render: " + str(e)}
     
     def check_render_status(self) -> Dict:
         """Check if render process is still running"""
