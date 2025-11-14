@@ -76,10 +76,11 @@ class BlenderTUIApp(App):
     }
     
     .controls_row {
-        height: 4;
+        height: 6;
         margin: 0 0 1 0;
         border: solid yellow;
         padding: 1;
+        display: block;
     }
     
     .timeout_config {
