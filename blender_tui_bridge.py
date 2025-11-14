@@ -90,11 +90,27 @@ try:
         elif command == 'render_with_config':
             # Configure everything at once then render
             config_data = args
+            print(f"[RENDER_CONFIG] Starting with config: {config_data}")
+            
+            print("[RENDER_CONFIG] Setting mode...")
             session.set_mode(config_data['mode'])
+            print(f"[RENDER_CONFIG] Mode set: {config_data['mode']}")
+            
+            print("[RENDER_CONFIG] Setting garment...")
             session.set_garment(config_data['garment'])
+            print(f"[RENDER_CONFIG] Garment set: {config_data['garment']}")
+            
+            print("[RENDER_CONFIG] Setting fabric...")
             session.set_fabric(config_data['fabric'])
+            print(f"[RENDER_CONFIG] Fabric set: {config_data['fabric']}")
+            
+            print("[RENDER_CONFIG] Setting asset...")
             session.set_asset(config_data['asset'])
+            print(f"[RENDER_CONFIG] Asset set: {config_data['asset']}")
+            
+            print("[RENDER_CONFIG] Starting render...")
             output_path = session.render()
+            print(f"[RENDER_CONFIG] Render completed: {output_path}")
             result['result'] = output_path
         else:
             result['error'] = f'Unknown command: {command}'
@@ -146,7 +162,17 @@ except Exception as e:
         print(f"[BRIDGE] Executing: {' '.join(cmd)}")
         
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            # Use longer timeout for render operations
+            timeout = 180 if command in ['render', 'render_with_config'] else 60
+            print(f"[BRIDGE] Using timeout: {timeout} seconds for command: {command}")
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            print(f"[BRIDGE] Blender exit code: {result.returncode}")
+            
+            if result.stdout:
+                print(f"[BRIDGE] Blender stdout: {result.stdout[:500]}...")  # First 500 chars
+            if result.stderr:
+                print(f"[BRIDGE] Blender stderr: {result.stderr[:500]}...")  # First 500 chars
             
             # Wait for result file
             max_wait = 10  # seconds

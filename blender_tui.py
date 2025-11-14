@@ -411,19 +411,28 @@ Status: {'Ready to render' if all([self.selected_mode, self.selected_garment, se
                 self.write_message("❌ Blender bridge not available - initializing...")
                 # Try to initialize bridge
                 try:
+                    self.write_message("🔄 Starting Blender subprocess (this may take a moment)...")
                     self.session = await asyncio.get_event_loop().run_in_executor(
                         None, lambda: BlenderTUISession(self.blender_exe)
                     )
                     self.write_message("✅ Blender bridge initialized")
                 except Exception as e:
                     self.write_message(f"❌ Failed to initialize Blender: {e}")
+                    self.write_message("💡 Make sure Blender is installed and accessible via 'blender' command")
+                    self.write_message("💡 You can specify path with: python main.py --interface tui --blender-path /path/to/blender")
                     return
             
             # Execute render with all configuration at once
             self.write_message("🔧 Configuring Blender and rendering...")
+            self.write_message(f"📋 Sending config: {config}")
+            
+            start_time = asyncio.get_event_loop().time()
             output_path = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: self.session.render_with_config(config)
             )
+            end_time = asyncio.get_event_loop().time()
+            
+            self.write_message(f"⏱️  Render took {end_time - start_time:.1f} seconds")
             self.write_message(f"🎉 Render completed: {output_path}")
             
         except ValueError as e:
