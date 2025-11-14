@@ -117,11 +117,7 @@ try:
             print(f"[RENDER_CONFIG] Config keys: {list(config_data.keys())}", flush=True)
             print(f"[RENDER_CONFIG] Full config: {json.dumps(config_data, indent=2)}", flush=True)
             
-            print(f"[RENDER_CONFIG] 🔧 Setting mode: {config_data['mode']}", flush=True)
-            session.set_mode(config_data['mode'])
-            print(f"[RENDER_CONFIG] ✅ Mode '{config_data['mode']}' applied", flush=True)
-            
-            print(f"[RENDER_CONFIG] 👔 Setting garment: {config_data['garment']}", flush=True)
+            print(f"[RENDER_CONFIG] � Setting garment: {config_data['garment']}", flush=True)
             session.set_garment(config_data['garment'])
             print(f"[RENDER_CONFIG] ✅ Garment '{config_data['garment']}' loaded", flush=True)
             
@@ -132,6 +128,10 @@ try:
             print(f"[RENDER_CONFIG] 🎯 Setting asset: {config_data['asset']}", flush=True)
             session.set_asset(config_data['asset'])
             print(f"[RENDER_CONFIG] ✅ Asset '{config_data['asset']}' loaded", flush=True)
+            
+            print(f"[RENDER_CONFIG] 🔧 Setting mode: {config_data['mode']} (AFTER scene load)", flush=True)
+            session.set_mode(config_data['mode'])
+            print(f"[RENDER_CONFIG] ✅ Mode '{config_data['mode']}' applied AFTER scene load", flush=True)
             
             print("[RENDER_CONFIG] 🎬 Starting render process...", flush=True)
             output_path = session.render()
