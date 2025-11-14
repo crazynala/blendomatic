@@ -6,22 +6,22 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import (
     Header, Footer, Static, Button, SelectionList, 
-    Label, DataTable, Collapsible, Log, LoadingIndicator
+    Label, Log
 )
 from textual.screen import Screen
-from textual.reactive import reactive
-from textual.message import Message
 from textual import on
-from rich.text import Text
-from rich.panel import Panel
 import asyncio
 from typing import Optional
 
 try:
     from render_session import RenderSession
 except ImportError:
-    # Fallback for when running outside Blender
-    RenderSession = None
+    try:
+        from demo_session import RenderSession
+        print("Info: Using demo session for TUI (Blender not available)")
+    except ImportError:
+        # Fallback for when running outside Blender
+        RenderSession = None
 
 
 class StatusPanel(Static):
@@ -62,23 +62,26 @@ class StatusPanel(Static):
 class SelectionPanel(Container):
     """Panel for making selections (modes, garments, fabrics, assets)"""
     
-    def __init__(self, title: str, items: list, session: Optional[RenderSession] = None):
+    def __init__(self, title: str, items: list, session=None):
         super().__init__()
         self.title = title
         self.items = items
         self.session = session
-        self.selection_list: Optional[SelectionList] = None
+        self.selection_list = None
     
     def compose(self) -> ComposeResult:
-        with Collapsible(title=self.title, collapsed=False):
-            self.selection_list = SelectionList(*self.items)
-            yield self.selection_list
-            yield Button(f"Set {self.title}", id=f"set_{self.title.lower()}")
+        yield Static(f"[bold]{self.title}[/]", classes="panel_title")
+        self.selection_list = SelectionList(*self.items)
+        yield self.selection_list
+        yield Button(f"Set {self.title}", id=f"set_{self.title.lower()}")
     
-    def get_selected(self) -> Optional[str]:
+    def get_selected(self):
         """Get currently selected item"""
-        if self.selection_list and self.selection_list.selected:
-            return str(self.selection_list.selected)
+        if self.selection_list and hasattr(self.selection_list, 'highlighted'):
+            try:
+                return self.items[self.selection_list.highlighted] if self.selection_list.highlighted is not None else None
+            except (IndexError, AttributeError):
+                pass
         return None
 
 
@@ -154,13 +157,13 @@ class RenderScreen(Screen):
     
     def __init__(self):
         super().__init__()
-        self.session: Optional[RenderSession] = None
-        self.status_panel: Optional[StatusPanel] = None
-        self.mode_panel: Optional[SelectionPanel] = None
-        self.garment_panel: Optional[SelectionPanel] = None
-        self.fabric_panel: Optional[SelectionPanel] = None
-        self.asset_panel: Optional[SelectionPanel] = None
-        self.log_panel: Optional[LogPanel] = None
+        self.session = None
+        self.status_panel = None
+        self.mode_panel = None
+        self.garment_panel = None
+        self.fabric_panel = None
+        self.asset_panel = None
+        self.log_panel = None
         
         # Initialize session
         try:
@@ -260,18 +263,21 @@ class RenderScreen(Screen):
         selected = self.garment_panel.get_selected()
         if selected:
             try:
-                # Show loading indicator while loading blend file
-                with LoadingIndicator():
-                    self.session.set_garment(selected)
+                # Show loading message while loading blend file
+                self.log("Loading garment blend file... (this may take a moment)")
+                self.session.set_garment(selected)
                 
                 self.log(f"Set garment: {selected}")
                 
                 # Update asset list after garment is loaded
                 if self.asset_panel and self.asset_panel.selection_list:
                     assets = self.session.list_assets()
-                    self.asset_panel.selection_list.clear_options()
-                    for asset in assets:
-                        self.asset_panel.selection_list.add_option(asset)
+                    # Update the items list for the selection panel
+                    self.asset_panel.items = assets
+                    # Create new selection list with updated items
+                    new_selection = SelectionList(*assets)
+                    # Replace the old selection list (simplified approach)
+                    self.asset_panel.selection_list = new_selection
                 
                 self.update_status()
             except Exception as e:
