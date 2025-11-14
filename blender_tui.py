@@ -141,7 +141,7 @@ class BlenderTUIApp(App):
         self.selected_asset: Optional[str] = None
         
         # Timeout configuration
-        self.use_timeout: bool = True
+        self.timeout_enabled: bool = True
         self.timeout_seconds: int = 600  # Default 10 minutes
     
     def _load_json_file(self, file_path: Path) -> Dict[str, Any]:
@@ -218,7 +218,7 @@ class BlenderTUIApp(App):
             with Horizontal():
                 # Left column: Mode & Fabric
                 with Vertical(classes="left_column"):
-                    yield Static("🔧 Mode", id="mode_title")
+                    yield Static("� Mode", id="mode_title")
                     self.mode_list = SelectionList(id="mode_list")
                     yield self.mode_list
                     
@@ -278,8 +278,6 @@ class BlenderTUIApp(App):
         except Exception as e:
             self.write_message(f"⚠️  Blender bridge unavailable: {e}")
             self.write_message("📁 Running in file-only mode (no rendering)")
-            if self.status_display:
-                self.status_display.update("File-only mode - Blender bridge unavailable")
         
         self.write_message("✅ TUI ready - click on items to select them")
     
@@ -446,21 +444,13 @@ class BlenderTUIApp(App):
                 pass  # Invalid input, ignore
     
     async def update_local_status(self):
-        """Update status display with local selections"""
-        if not self.status_display:
-            return
-        
+        """Update message log with current configuration status"""
         timeout_status = f"{self.timeout_seconds}s" if self.timeout_enabled else "Disabled"
         
-        status_text = f"""Mode: {self.selected_mode or 'Not selected'}
-Garment: {self.selected_garment or 'Not selected'}  
-Fabric: {self.selected_fabric or 'Not selected'}
-Asset: {self.selected_asset or 'Not selected'}
-Timeout: {timeout_status}
-
-Status: {'Ready to render' if all([self.selected_mode, self.selected_garment, self.selected_fabric, self.selected_asset]) else 'Configuration incomplete'}"""
+        ready = all([self.selected_mode, self.selected_garment, self.selected_fabric, self.selected_asset])
+        status = 'Ready to render' if ready else 'Configuration incomplete'
         
-        self.status_display.update(status_text)
+        self.write_message(f"🔧 Mode: {self.selected_mode or 'Not selected'} | 👔 Garment: {self.selected_garment or 'Not selected'} | 🧵 Fabric: {self.selected_fabric or 'Not selected'} | 🎯 Asset: {self.selected_asset or 'Not selected'} | ⏱️ Timeout: {timeout_status} | Status: {status}")
     
     async def tail_log_file(self, log_file_path: str):
         """Tail the Blender log file and stream output to TUI"""
