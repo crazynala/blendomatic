@@ -12,6 +12,17 @@ try:
     TEXTUAL_AVAILABLE = True
 except ImportError:
     TEXTUAL_AVAILABLE = False
+    # Create dummy classes to prevent NameError
+    class App: pass
+    class ComposeResult: pass
+    class Container: pass
+    class Header: pass
+    class Footer: pass
+    class Static: pass
+    class Button: pass
+    class SelectionList: pass
+    class Label: pass
+    class Log: pass
 
 from blender_tui_bridge import BlenderTUISession
 import sys
@@ -116,7 +127,7 @@ class BlenderTUIApp(App):
     
     async def on_mount(self):
         """Initialize the session when app starts"""
-        self.log("🚀 Initializing Blender TUI Bridge...")
+        self.log_message("🚀 Initializing Blender TUI Bridge...")
         
         try:
             # Initialize session in a separate thread to avoid blocking
@@ -124,15 +135,15 @@ class BlenderTUIApp(App):
                 None, lambda: BlenderTUISession(self.blender_exe)
             )
             
-            self.log("✅ Bridge initialized successfully")
+            self.log_message("✅ Bridge initialized successfully")
             await self.refresh_all_lists()
             await self.update_status()
             
         except Exception as e:
-            self.log(f"❌ Failed to initialize bridge: {e}")
+            self.log_message(f"❌ Failed to initialize bridge: {e}")
             self.status_display.update(f"Error: {e}")
     
-    def log(self, message: str):
+    def log_message(self, message: str):
         """Add message to log"""
         if self.log_display:
             self.log_display.write_line(message)
@@ -175,10 +186,10 @@ class BlenderTUIApp(App):
             for asset in assets:
                 self.asset_list.add_option(asset)
             
-            self.log("📋 Lists refreshed")
+            self.log_message("📋 Lists refreshed")
             
         except Exception as e:
-            self.log(f"❌ Failed to refresh lists: {e}")
+            self.log_message(f"❌ Failed to refresh lists: {e}")
     
     async def update_status(self):
         """Update status display"""
@@ -202,7 +213,7 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
             self.status_display.update(status_text)
             
         except Exception as e:
-            self.log(f"❌ Failed to update status: {e}")
+            self.log_message(f"❌ Failed to update status: {e}")
     
     @on(Button.Pressed, "#set_mode_btn")
     async def set_mode(self):
@@ -210,16 +221,16 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
             return
         
         mode = str(self.mode_list.selected)
-        self.log(f"🔧 Setting mode: {mode}")
+        self.log_message(f"🔧 Setting mode: {mode}")
         
         try:
             await asyncio.get_event_loop().run_in_executor(
                 None, lambda: self.session.set_mode(mode)
             )
-            self.log(f"✅ Mode set: {mode}")
+            self.log_message(f"✅ Mode set: {mode}")
             await self.update_status()
         except Exception as e:
-            self.log(f"❌ Failed to set mode: {e}")
+            self.log_message(f"❌ Failed to set mode: {e}")
     
     @on(Button.Pressed, "#set_garment_btn")  
     async def set_garment(self):
@@ -227,17 +238,17 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
             return
         
         garment = str(self.garment_list.selected)
-        self.log(f"👔 Setting garment: {garment}")
+        self.log_message(f"👔 Setting garment: {garment}")
         
         try:
             await asyncio.get_event_loop().run_in_executor(
                 None, lambda: self.session.set_garment(garment)
             )
-            self.log(f"✅ Garment set: {garment}")
+            self.log_message(f"✅ Garment set: {garment}")
             await self.refresh_all_lists()  # Refresh assets
             await self.update_status()
         except Exception as e:
-            self.log(f"❌ Failed to set garment: {e}")
+            self.log_message(f"❌ Failed to set garment: {e}")
     
     @on(Button.Pressed, "#set_fabric_btn")
     async def set_fabric(self):
@@ -245,16 +256,16 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
             return
         
         fabric = str(self.fabric_list.selected)
-        self.log(f"🧵 Setting fabric: {fabric}")
+        self.log_message(f"🧵 Setting fabric: {fabric}")
         
         try:
             await asyncio.get_event_loop().run_in_executor(
                 None, lambda: self.session.set_fabric(fabric)
             )
-            self.log(f"✅ Fabric set: {fabric}")
+            self.log_message(f"✅ Fabric set: {fabric}")
             await self.update_status()
         except Exception as e:
-            self.log(f"❌ Failed to set fabric: {e}")
+            self.log_message(f"❌ Failed to set fabric: {e}")
     
     @on(Button.Pressed, "#set_asset_btn")
     async def set_asset(self):
@@ -262,16 +273,16 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
             return
         
         asset = str(self.asset_list.selected)
-        self.log(f"🎯 Setting asset: {asset}")
+        self.log_message(f"🎯 Setting asset: {asset}")
         
         try:
             await asyncio.get_event_loop().run_in_executor(
                 None, lambda: self.session.set_asset(asset)
             )
-            self.log(f"✅ Asset set: {asset}")
+            self.log_message(f"✅ Asset set: {asset}")
             await self.update_status()
         except Exception as e:
-            self.log(f"❌ Failed to set asset: {e}")
+            self.log_message(f"❌ Failed to set asset: {e}")
     
     @on(Button.Pressed, "#render_btn")
     async def render(self):
@@ -284,19 +295,19 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
         )
         
         if not state.get('ready_to_render'):
-            self.log("❌ Cannot render - missing required selections")
+            self.log_message("❌ Cannot render - missing required selections")
             return
         
-        self.log("🎬 Starting render...")
+        self.log_message("🎬 Starting render...")
         
         try:
             output_path = await asyncio.get_event_loop().run_in_executor(
                 None, self.session.render
             )
-            self.log(f"🎉 Render completed: {output_path}")
+            self.log_message(f"🎉 Render completed: {output_path}")
             await self.update_status()
         except Exception as e:
-            self.log(f"❌ Render failed: {e}")
+            self.log_message(f"❌ Render failed: {e}")
     
     async def on_unmount(self):
         """Clean up when app closes"""
