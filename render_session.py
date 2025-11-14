@@ -357,23 +357,35 @@ class RenderSession:
         obj.hide_render = not render_enabled
         print(f"[MESH_CONFIG]   render: {render_enabled} (hide_render: {obj.hide_render})", flush=True)
         
-        # Check render engine
+        # Check render engine and Blender version
         render_engine = bpy.context.scene.render.engine
-        print(f"[MESH_CONFIG]   render_engine: {render_engine}", flush=True)
+        blender_version = bpy.app.version_string
+        print(f"[MESH_CONFIG]   render_engine: {render_engine}, blender_version: {blender_version}", flush=True)
+        
+        # Debug available cycles properties
+        if hasattr(obj, 'cycles'):
+            available_props = [attr for attr in dir(obj.cycles) if not attr.startswith('_')]
+            print(f"[MESH_CONFIG]   available cycles properties: {available_props}", flush=True)
         
         # Holdout configuration
         holdout_enabled = mesh_config.get("holdout", False)
-        if hasattr(obj, 'cycles'):
+        if hasattr(obj, 'cycles') and hasattr(obj.cycles, 'is_holdout'):
             obj.cycles.is_holdout = holdout_enabled
             print(f"[MESH_CONFIG]   holdout: {holdout_enabled} (is_holdout: {obj.cycles.is_holdout})", flush=True)
+        elif hasattr(obj, 'cycles'):
+            print(f"[WARN] Object {obj.name} cycles properties don't support is_holdout (Blender version issue?)", flush=True)
+            print(f"[MESH_CONFIG]   holdout: {holdout_enabled} (NOT APPLIED - unsupported)", flush=True)
         else:
             print(f"[WARN] Object {obj.name} has no cycles properties - render engine issue?", flush=True)
         
         # Shadow catcher configuration
         shadow_catcher_enabled = mesh_config.get("shadow_catcher", False)
-        if hasattr(obj, 'cycles'):
+        if hasattr(obj, 'cycles') and hasattr(obj.cycles, 'is_shadow_catcher'):
             obj.cycles.is_shadow_catcher = shadow_catcher_enabled
             print(f"[MESH_CONFIG]   shadow_catcher: {shadow_catcher_enabled} (is_shadow_catcher: {obj.cycles.is_shadow_catcher})", flush=True)
+        elif hasattr(obj, 'cycles'):
+            print(f"[WARN] Object {obj.name} cycles properties don't support is_shadow_catcher (Blender version issue?)", flush=True)
+            print(f"[MESH_CONFIG]   shadow_catcher: {shadow_catcher_enabled} (NOT APPLIED - unsupported)", flush=True)
         else:
             print(f"[WARN] Object {obj.name} has no cycles properties for shadow_catcher - render engine issue?", flush=True)
         
