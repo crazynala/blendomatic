@@ -16,6 +16,8 @@ def main():
         in_blender = False
         print("[INFO] Running outside Blender - demo mode available")
     
+    # Note: Textual TUI works fine over SSH, so no special handling needed
+    
     parser = argparse.ArgumentParser(
         description="Blendomatic - Blender Render Automation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -36,6 +38,10 @@ Examples for Blender integration (actual rendering):
   blender --background --python main.py  # Shell in Blender
   blender --background --python main.py -- --interface wizard
   blender your_file.blend --python main.py
+  
+For SSH/headless environments:
+  python ssh_interface.py                 # SSH-optimized launcher
+  python main.py --interface shell        # Direct shell (reliable over SSH)
   
 Note: The original script was meant to be run AS A BLENDER SCRIPT:
   blender --background --python render_automation.py

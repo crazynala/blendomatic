@@ -1,6 +1,6 @@
 """
-Fixed Blender TUI that properly handles Textual's logging system
-This version avoids all conflicts with Textual's internal log property
+Blender TUI using Bridge Architecture
+Runs TUI outside Blender and communicates via subprocess
 """
 try:
     from textual.app import App, ComposeResult
@@ -12,7 +12,7 @@ try:
     TEXTUAL_AVAILABLE = True
 except ImportError:
     TEXTUAL_AVAILABLE = False
-    # Create dummy classes to prevent import errors when textual unavailable
+    # Create dummy classes and decorators to prevent NameError
     class App: 
         def run(self): pass
     class ComposeResult: pass
@@ -26,6 +26,7 @@ except ImportError:
     class Label: pass
     class Log: pass
     
+    # Dummy decorator
     def on(*args, **kwargs):
         def decorator(func):
             return func
@@ -40,7 +41,6 @@ from typing import Optional
 class BlenderTUIApp(App):
     """
     Textual TUI that communicates with Blender via bridge
-    Properly handles Textual's logging system without conflicts
     """
     
     TITLE = "Blendomatic - Blender TUI"
@@ -61,7 +61,7 @@ class BlenderTUIApp(App):
         padding: 1;
     }
     
-    .message_panel {
+    .log_panel {
         dock: bottom;
         height: 30%;
         border: solid white;
@@ -86,9 +86,9 @@ class BlenderTUIApp(App):
         self.session: Optional[BlenderTUISession] = None
         self.blender_exe = blender_executable
         
-        # UI components - avoid 'log' in names to prevent conflicts
+        # UI components
         self.status_display: Optional[Static] = None
-        self.message_display: Optional[Log] = None  # Renamed from log_display
+        self.app_log_display: Optional[Log] = None  # Renamed to avoid conflict
         self.mode_list: Optional[SelectionList] = None
         self.garment_list: Optional[SelectionList] = None
         self.fabric_list: Optional[SelectionList] = None
@@ -128,17 +128,17 @@ class BlenderTUIApp(App):
                 
                 yield Button("🎬 RENDER", id="render_btn", variant="success")
             
-            # Message panel (renamed from log panel)
-            with Container(classes="message_panel"):
-                yield Static("Messages", id="message_title")
-                self.message_display = Log(auto_scroll=True)
-                yield self.message_display
+            # Log panel
+            with Container(classes="log_panel"):
+                yield Static("Blender Log", id="log_title")
+                self.app_log_display = Log(auto_scroll=True)
+                yield self.app_log_display
         
         yield Footer()
     
     async def on_mount(self):
         """Initialize the session when app starts"""
-        self.write_message("🚀 Initializing Blender TUI Bridge...")
+        self.log_message("🚀 Initializing Blender TUI Bridge...")
         
         try:
             # Initialize session in a separate thread to avoid blocking
@@ -146,23 +146,19 @@ class BlenderTUIApp(App):
                 None, lambda: BlenderTUISession(self.blender_exe)
             )
             
-            self.write_message("✅ Bridge initialized successfully")
+            self.log_message("✅ Bridge initialized successfully")
             await self.refresh_all_lists()
             await self.update_status()
             
         except Exception as e:
-            self.write_message(f"❌ Failed to initialize bridge: {e}")
-            if self.status_display:
-                self.status_display.update(f"Error: {e}")
+            self.log_message(f"❌ Failed to initialize bridge: {e}")
+            self.status_display.update(f"Error: {e}")
     
-    def write_message(self, message: str):
-        """Write message to the message display (avoiding 'log' method name)"""
-        if self.message_display:
-            self.message_display.write_line(message)
-        # Also use Textual's built-in logging properly
-        if hasattr(self, 'log') and hasattr(self.log, 'info'):
-            self.log.info(message)
-        print(message)  # Also print to console for debugging
+    def log_message(self, message: str):
+        """Add message to log"""
+        if self.app_log_display:
+            self.app_log_display.write_line(message)
+        print(message)  # Also print to console
     
     async def refresh_all_lists(self):
         """Refresh all selection lists"""
@@ -185,30 +181,26 @@ class BlenderTUIApp(App):
             )
             
             # Update lists
-            if self.mode_list:
-                self.mode_list.clear_options()
-                for mode in modes:
-                    self.mode_list.add_option(mode)
+            self.mode_list.clear_options()
+            for mode in modes:
+                self.mode_list.add_option(mode)
             
-            if self.garment_list:
-                self.garment_list.clear_options()
-                for garment in garments:
-                    self.garment_list.add_option(garment)
+            self.garment_list.clear_options()
+            for garment in garments:
+                self.garment_list.add_option(garment)
                 
-            if self.fabric_list:
-                self.fabric_list.clear_options()
-                for fabric in fabrics:
-                    self.fabric_list.add_option(fabric)
+            self.fabric_list.clear_options()
+            for fabric in fabrics:
+                self.fabric_list.add_option(fabric)
                 
-            if self.asset_list:
-                self.asset_list.clear_options()
-                for asset in assets:
-                    self.asset_list.add_option(asset)
+            self.asset_list.clear_options()
+            for asset in assets:
+                self.asset_list.add_option(asset)
             
-            self.write_message("📋 Lists refreshed")
+            self.log_message("📋 Lists refreshed")
             
         except Exception as e:
-            self.write_message(f"❌ Failed to refresh lists: {e}")
+            self.log_message(f"❌ Failed to refresh lists: {e}")
     
     async def update_status(self):
         """Update status display"""
@@ -232,76 +224,76 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
             self.status_display.update(status_text)
             
         except Exception as e:
-            self.write_message(f"❌ Failed to update status: {e}")
+            self.log_message(f"❌ Failed to update status: {e}")
     
     @on(Button.Pressed, "#set_mode_btn")
     async def set_mode(self):
-        if not self.session or not self.mode_list or not self.mode_list.selected:
+        if not self.session or not self.mode_list.selected:
             return
         
         mode = str(self.mode_list.selected)
-        self.write_message(f"🔧 Setting mode: {mode}")
+        self.log_message(f"🔧 Setting mode: {mode}")
         
         try:
             await asyncio.get_event_loop().run_in_executor(
                 None, lambda: self.session.set_mode(mode)
             )
-            self.write_message(f"✅ Mode set: {mode}")
+            self.log_message(f"✅ Mode set: {mode}")
             await self.update_status()
         except Exception as e:
-            self.write_message(f"❌ Failed to set mode: {e}")
+            self.log_message(f"❌ Failed to set mode: {e}")
     
     @on(Button.Pressed, "#set_garment_btn")  
     async def set_garment(self):
-        if not self.session or not self.garment_list or not self.garment_list.selected:
+        if not self.session or not self.garment_list.selected:
             return
         
         garment = str(self.garment_list.selected)
-        self.write_message(f"👔 Setting garment: {garment}")
+        self.log_message(f"👔 Setting garment: {garment}")
         
         try:
             await asyncio.get_event_loop().run_in_executor(
                 None, lambda: self.session.set_garment(garment)
             )
-            self.write_message(f"✅ Garment set: {garment}")
+            self.log_message(f"✅ Garment set: {garment}")
             await self.refresh_all_lists()  # Refresh assets
             await self.update_status()
         except Exception as e:
-            self.write_message(f"❌ Failed to set garment: {e}")
+            self.log_message(f"❌ Failed to set garment: {e}")
     
     @on(Button.Pressed, "#set_fabric_btn")
     async def set_fabric(self):
-        if not self.session or not self.fabric_list or not self.fabric_list.selected:
+        if not self.session or not self.fabric_list.selected:
             return
         
         fabric = str(self.fabric_list.selected)
-        self.write_message(f"🧵 Setting fabric: {fabric}")
+        self.log_message(f"🧵 Setting fabric: {fabric}")
         
         try:
             await asyncio.get_event_loop().run_in_executor(
                 None, lambda: self.session.set_fabric(fabric)
             )
-            self.write_message(f"✅ Fabric set: {fabric}")
+            self.log_message(f"✅ Fabric set: {fabric}")
             await self.update_status()
         except Exception as e:
-            self.write_message(f"❌ Failed to set fabric: {e}")
+            self.log_message(f"❌ Failed to set fabric: {e}")
     
     @on(Button.Pressed, "#set_asset_btn")
     async def set_asset(self):
-        if not self.session or not self.asset_list or not self.asset_list.selected:
+        if not self.session or not self.asset_list.selected:
             return
         
         asset = str(self.asset_list.selected)
-        self.write_message(f"🎯 Setting asset: {asset}")
+        self.log_message(f"🎯 Setting asset: {asset}")
         
         try:
             await asyncio.get_event_loop().run_in_executor(
                 None, lambda: self.session.set_asset(asset)
             )
-            self.write_message(f"✅ Asset set: {asset}")
+            self.log_message(f"✅ Asset set: {asset}")
             await self.update_status()
         except Exception as e:
-            self.write_message(f"❌ Failed to set asset: {e}")
+            self.log_message(f"❌ Failed to set asset: {e}")
     
     @on(Button.Pressed, "#render_btn")
     async def render(self):
@@ -314,19 +306,19 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
         )
         
         if not state.get('ready_to_render'):
-            self.write_message("❌ Cannot render - missing required selections")
+            self.log_message("❌ Cannot render - missing required selections")
             return
         
-        self.write_message("🎬 Starting render...")
+        self.log_message("🎬 Starting render...")
         
         try:
             output_path = await asyncio.get_event_loop().run_in_executor(
                 None, self.session.render
             )
-            self.write_message(f"🎉 Render completed: {output_path}")
+            self.log_message(f"🎉 Render completed: {output_path}")
             await self.update_status()
         except Exception as e:
-            self.write_message(f"❌ Render failed: {e}")
+            self.log_message(f"❌ Render failed: {e}")
     
     async def on_unmount(self):
         """Clean up when app closes"""
@@ -340,6 +332,33 @@ def main():
         print("❌ Textual not available. Install with: pip install textual")
         print("💡 Or use the shell interface: python main.py --interface shell")
         sys.exit(1)
+    
+    # Check if we're in an SSH session or headless environment
+    import os
+    is_ssh = 'SSH_CLIENT' in os.environ or 'SSH_TTY' in os.environ
+    no_display = 'DISPLAY' not in os.environ
+    
+    if is_ssh or no_display:
+        print("⚠️  SSH or headless environment detected!")
+        print("TUI may not work properly in this environment.")
+        print("")
+        print("💡 Better alternatives:")
+        print("  python main.py --interface shell  # Interactive shell")
+        print("  blender --background --python main.py  # Direct Blender shell")
+        print("")
+        proceed = input("Continue with TUI anyway? (y/N): ").lower().strip()
+        if proceed not in ['y', 'yes']:
+            print("🔄 Falling back to shell interface...")
+            try:
+                import sys
+                import os
+                sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                from shell import main as shell_main
+                shell_main()
+                return
+            except ImportError:
+                print("❌ Shell interface not available")
+                sys.exit(1)
     
     print("🎨 BLENDER TUI - Bridge Mode")
     print("=" * 50)
@@ -364,15 +383,25 @@ def main():
     else:
         blender_path = "blender"
     
-    # Run the app with proper error handling
+    # Run the app with error handling
     try:
         app = BlenderTUIApp(blender_path)
         app.run()
     except Exception as e:
-        print(f"\n❌ TUI error: {e}")
-        print("This may happen due to terminal compatibility issues.")
-        print("💡 Try the shell interface: python main.py --interface shell")
-        sys.exit(1)
+        print(f"\n❌ TUI failed to start: {e}")
+        print("This often happens in SSH or headless environments.")
+        print("")
+        print("🔄 Falling back to shell interface...")
+        try:
+            import sys
+            import os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from shell import main as shell_main
+            shell_main()
+        except ImportError:
+            print("❌ Shell interface not available")
+            print("💡 Try: python main.py --interface shell")
+            sys.exit(1)
 
 
 if __name__ == "__main__":
