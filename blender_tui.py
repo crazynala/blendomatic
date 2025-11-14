@@ -2,16 +2,17 @@
 Fixed Blender TUI that properly handles Textual's logging system
 This version avoids all conflicts with Textual's internal log property
 """
+import asyncio
+import json
+from pathlib import Path
+from typing import Optional, List, Dict, Any
+
 try:
     from textual.app import App, ComposeResult
     from textual.containers import Container, Horizontal, Vertical
-    from textual.widgets import Header, Footer, Static, Button, SelectionList, Label, Log
+    from textual.widgets import Header, Footer, Static, Button, SelectionList, Label, Log, Checkbox, Input
     from textual.screen import Screen
     from textual import on
-    import asyncio
-    import json
-    from pathlib import Path
-    from typing import Optional, List, Dict, Any
     TEXTUAL_AVAILABLE = True
 except ImportError:
     TEXTUAL_AVAILABLE = False
@@ -28,6 +29,8 @@ except ImportError:
     class SelectionList: pass
     class Label: pass
     class Log: pass
+    class Checkbox: pass
+    class Input: pass
     
     def on(*args, **kwargs):
         def decorator(func):
@@ -51,38 +54,65 @@ class BlenderTUIApp(App):
     TITLE = "Blendomatic - Blender TUI"
     
     CSS = """
-    .status_panel {
-        dock: left;
-        width: 30%;
-        border: solid white;
-        margin: 1;
+    .left_column {
+        width: 25%;
+        border: solid green;
+        margin: 0 1 1 0;
         padding: 1;
     }
     
-    .controls_panel {
-        dock: right;
+    .middle_column {
         width: 35%;
-        margin: 1;
+        border: solid blue;  
+        margin: 0 1 1 0;
         padding: 1;
+    }
+    
+    .right_column {
+        width: 40%;
+        border: solid purple;
+        margin: 0 0 1 0;
+        padding: 1;
+    }
+    
+    .controls_row {
+        height: 4;
+        margin: 0 0 1 0;
+        border: solid yellow;
+        padding: 1;
+    }
+    
+    .timeout_config {
+        width: 30%;
+        margin: 0 1 0 0;
     }
     
     .message_panel {
         dock: bottom;
-        height: 30%;
+        height: 35%;
         border: solid white;
         margin: 1;
         padding: 1;
     }
     
     SelectionList {
-        height: 8;
+        height: 12;
         border: solid gray;
         margin: 0 0 1 0;
     }
     
     Button {
+        height: 3;
+        margin: 0;
+    }
+    
+    Input {
+        height: 1;
+        margin: 0;
+    }
+    
+    Checkbox {
         margin: 0 0 1 0;
-        width: 100%;
     }
     """
     
@@ -92,12 +122,13 @@ class BlenderTUIApp(App):
         self.blender_exe = blender_executable
         
         # UI components - avoid 'log' in names to prevent conflicts
-        self.status_display: Optional[Static] = None
         self.message_display: Optional[Log] = None  # Renamed from log_display
         self.mode_list: Optional[SelectionList] = None
         self.garment_list: Optional[SelectionList] = None
         self.fabric_list: Optional[SelectionList] = None
         self.asset_list: Optional[SelectionList] = None
+        self.timeout_checkbox: Optional[Checkbox] = None
+        self.timeout_input: Optional[Input] = None
         
         # Local data caches
         self.garment_data: Dict[str, Any] = {}
@@ -108,6 +139,10 @@ class BlenderTUIApp(App):
         self.selected_garment: Optional[str] = None  
         self.selected_fabric: Optional[str] = None
         self.selected_asset: Optional[str] = None
+        
+        # Timeout configuration
+        self.use_timeout: bool = True
+        self.timeout_seconds: int = 600  # Default 10 minutes
     
     def _load_json_file(self, file_path: Path) -> Dict[str, Any]:
         """Load a JSON file safely"""
@@ -179,35 +214,43 @@ class BlenderTUIApp(App):
         yield Header(show_clock=True)
         
         with Container():
-            # Status panel
-            with Container(classes="status_panel"):
-                yield Static("Blender Status", id="status_title")
-                self.status_display = Static("Initializing...", id="status_content")
-                yield self.status_display
+            # Three-column main layout
+            with Horizontal():
+                # Left column: Mode & Fabric
+                with Vertical(classes="left_column"):
+                    yield Static("🔧 Mode", id="mode_title")
+                    self.mode_list = SelectionList(id="mode_list")
+                    yield self.mode_list
+                    
+                    yield Static("🧵 Fabric", id="fabric_title")
+                    self.fabric_list = SelectionList(id="fabric_list")
+                    yield self.fabric_list
+                
+                # Middle column: Garments
+                with Vertical(classes="middle_column"):
+                    yield Static("👔 Garment", id="garment_title")  
+                    self.garment_list = SelectionList(id="garment_list")
+                    yield self.garment_list
+                
+                # Right column: Assets
+                with Vertical(classes="right_column"):
+                    yield Static("🎯 Asset", id="asset_title")
+                    self.asset_list = SelectionList(id="asset_list")
+                    yield self.asset_list
             
-            # Controls panel
-            with Container(classes="controls_panel"):
-                yield Static("Mode", id="mode_title")
-                self.mode_list = SelectionList(id="mode_list")
-                yield self.mode_list
-                
-                yield Static("Garment", id="garment_title")  
-                self.garment_list = SelectionList(id="garment_list")
-                yield self.garment_list
-                
-                yield Static("Fabric", id="fabric_title")
-                self.fabric_list = SelectionList(id="fabric_list")
-                yield self.fabric_list
-                
-                yield Static("Asset", id="asset_title")
-                self.asset_list = SelectionList(id="asset_list")
-                yield self.asset_list
+            # Bottom section: Timeout config and render controls
+            with Horizontal(classes="controls_row"):
+                with Vertical(classes="timeout_config"):
+                    self.timeout_checkbox = Checkbox("Use timeout", value=True, id="timeout_checkbox")
+                    yield self.timeout_checkbox
+                    self.timeout_input = Input(value="600", placeholder="Seconds", id="timeout_input")
+                    yield self.timeout_input
                 
                 yield Button("🎬 RENDER", id="render_btn", variant="success")
             
-            # Message panel (renamed from log panel)
+            # Message panel
             with Container(classes="message_panel"):
-                yield Static("Messages", id="message_title")
+                yield Static("📄 Messages & Blender Output", id="message_title")
                 self.message_display = Log(auto_scroll=True)
                 yield self.message_display
         
@@ -383,15 +426,37 @@ class BlenderTUIApp(App):
             self.write_message(f"✅ Asset selected: {asset}")
             await self.update_local_status()
     
+    async def on_checkbox_changed(self, event):
+        """Handle timeout checkbox changes"""
+        if event.checkbox is self.timeout_checkbox:
+            self.timeout_enabled = event.value
+            if hasattr(self, 'timeout_input'):
+                self.timeout_input.disabled = not self.timeout_enabled
+            await self.update_local_status()
+    
+    async def on_input_changed(self, event):
+        """Handle timeout input changes"""
+        if hasattr(event, 'input') and event.input is self.timeout_input:
+            try:
+                value = int(event.value)
+                if value > 0:
+                    self.timeout_seconds = value
+                    await self.update_local_status()
+            except ValueError:
+                pass  # Invalid input, ignore
+    
     async def update_local_status(self):
         """Update status display with local selections"""
         if not self.status_display:
             return
         
+        timeout_status = f"{self.timeout_seconds}s" if self.timeout_enabled else "Disabled"
+        
         status_text = f"""Mode: {self.selected_mode or 'Not selected'}
 Garment: {self.selected_garment or 'Not selected'}  
 Fabric: {self.selected_fabric or 'Not selected'}
 Asset: {self.selected_asset or 'Not selected'}
+Timeout: {timeout_status}
 
 Status: {'Ready to render' if all([self.selected_mode, self.selected_garment, self.selected_fabric, self.selected_asset]) else 'Configuration incomplete'}"""
         
