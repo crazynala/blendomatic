@@ -210,6 +210,25 @@ class BlenderTUIApp(App):
         except Exception as e:
             self.write_message(f"❌ Failed to refresh lists: {e}")
     
+    async def refresh_assets_list(self):
+        """Refresh only the assets list (called after garment selection)"""
+        if not self.session or not self.asset_list:
+            return
+        
+        try:
+            assets = await asyncio.get_event_loop().run_in_executor(
+                None, self.session.list_assets
+            )
+            
+            self.asset_list.clear_options()
+            for asset in assets:
+                self.asset_list.add_option((asset, asset))
+            
+            self.write_message(f"🎯 Assets refreshed ({len(assets)} available)")
+            
+        except Exception as e:
+            self.write_message(f"❌ Failed to refresh assets: {e}")
+    
     async def update_status(self):
         """Update status display"""
         if not self.session or not self.status_display:
@@ -239,7 +258,9 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
         if not self.session or not self.mode_list or not self.mode_list.selected:
             return
         
-        mode = str(self.mode_list.selected)
+        # Handle both single value and list selection
+        selected = self.mode_list.selected
+        mode = selected[0] if isinstance(selected, list) else selected
         self.write_message(f"🔧 Setting mode: {mode}")
         
         try:
@@ -251,12 +272,14 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
         except Exception as e:
             self.write_message(f"❌ Failed to set mode: {e}")
     
-    @on(Button.Pressed, "#set_garment_btn")  
+    @on(Button.Pressed, "#set_garment_btn")
     async def set_garment(self):
         if not self.session or not self.garment_list or not self.garment_list.selected:
             return
         
-        garment = str(self.garment_list.selected)
+        # Handle both single value and list selection
+        selected = self.garment_list.selected
+        garment = selected[0] if isinstance(selected, list) else selected
         self.write_message(f"👔 Setting garment: {garment}")
         
         try:
@@ -264,8 +287,9 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
                 None, lambda: self.session.set_garment(garment)
             )
             self.write_message(f"✅ Garment set: {garment}")
-            await self.refresh_all_lists()  # Refresh assets
             await self.update_status()
+            # Refresh assets list since it depends on the selected garment
+            await self.refresh_assets_list()
         except Exception as e:
             self.write_message(f"❌ Failed to set garment: {e}")
     
@@ -274,7 +298,9 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
         if not self.session or not self.fabric_list or not self.fabric_list.selected:
             return
         
-        fabric = str(self.fabric_list.selected)
+        # Handle both single value and list selection
+        selected = self.fabric_list.selected
+        fabric = selected[0] if isinstance(selected, list) else selected
         self.write_message(f"🧵 Setting fabric: {fabric}")
         
         try:
@@ -291,7 +317,9 @@ Fabric Applied: {'✅' if state.get('fabric_applied') else '❌'}"""
         if not self.session or not self.asset_list or not self.asset_list.selected:
             return
         
-        asset = str(self.asset_list.selected)
+        # Handle both single value and list selection
+        selected = self.asset_list.selected
+        asset = selected[0] if isinstance(selected, list) else selected
         self.write_message(f"🎯 Setting asset: {asset}")
         
         try:
