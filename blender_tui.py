@@ -614,59 +614,70 @@ class BlenderTUIApp(App):
                     self.write_message(f"🎉 Render completed: {output_path}")
             else:
                 # Multiple combinations - use batch rendering in single Blender process
-                self.write_message(f"🔧 Rendering {total_combinations} fabric x asset combinations in batch...")
-                
-                # Start log streaming for batch rendering
-                log_file_path = self.session.bridge.get_log_file_path()
-                if log_file_path:
-                    # Clear existing log content and start tailing
-                    try:
-                        open(log_file_path, 'w').close()  # Clear log file
-                    except:
-                        pass
-                    log_task = asyncio.create_task(self.tail_log_file(log_file_path))
-                    self.current_log_task = log_task
-                    self.write_message(f"📄 Streaming batch render log from: {log_file_path}")
+                self.write_message(f"🔧 Starting batch render of {total_combinations} fabric x asset combinations...")
                 
                 try:
-                    # Execute all combinations in a single Blender process
-                    batch_result = await asyncio.get_event_loop().run_in_executor(
-                        None, lambda: self.session.render_multiple_configs(configs)
-                    )
+                    # Start detached batch rendering
+                    batch_result = self.session.render_multiple_configs(configs)
                     
-                    successful_renders = batch_result.get('successful_renders', [])
-                    failed_renders = batch_result.get('failed_renders', [])
+                    if not batch_result.get('success', False):
+                        raise Exception(batch_result.get('error', 'Unknown batch render error'))
                     
-                    # Summary for batch renders
-                    end_time = asyncio.get_event_loop().time()
-                    self.write_message(f"⏱️  Total render time: {end_time - start_time:.1f} seconds")
-                    
-                    if successful_renders:
-                        self.write_message(f"🎉 {len(successful_renders)} renders completed successfully:")
-                        for render in successful_renders:
-                            fabric = render['fabric']
-                            asset = render['asset']
-                            output_path = render['output_path']
-                            self.write_message(f"  ✅ {fabric} × {asset}: {output_path}")
-                    
-                    if failed_renders:
-                        self.write_message(f"❌ {len(failed_renders)} renders failed:")
-                        for render in failed_renders:
-                            fabric = render['fabric']
-                            asset = render['asset']
-                            error = render['error']
-                            self.write_message(f"  ❌ {fabric} × {asset}: {error}")
-                    
-                    if not successful_renders and not failed_renders:
-                        self.write_message("🛑 No renders completed")
+                    if batch_result.get('detached'):
+                        # Detached batch render started successfully
+                        self.render_pid = batch_result.get('pid')
+                        self.write_message(f"🚀 Batch render started in background (PID: {self.render_pid})")
+                        
+                        # Start log tailing
+                        log_file_path = batch_result.get('log_file')
+                        if log_file_path:
+                            log_task = asyncio.create_task(self.tail_log_file(log_file_path))
+                            self.current_log_task = log_task
+                            self.write_message(f"📄 Streaming batch render log from: {log_file_path}")
+                        
+                        # Start monitoring the render process
+                        monitor_task = asyncio.create_task(self.monitor_render_process())
+                        self.current_render_task = monitor_task
+                        
+                        # Don't wait for completion - return immediately
+                        self.write_message("✅ Batch render started successfully! Use Cancel to stop.")
+                        return
+                    else:
+                        # Synchronous batch render completed (fallback case)
+                        self.write_message("⚠️  Batch render completed synchronously (unexpected)")
+                        batch_data = batch_result.get('result', {})
+                        
+                        successful_renders = batch_data.get('successful_renders', [])
+                        failed_renders = batch_data.get('failed_renders', [])
+                        
+                        # Summary for synchronous batch renders
+                        end_time = asyncio.get_event_loop().time()
+                        self.write_message(f"⏱️  Total render time: {end_time - start_time:.1f} seconds")
+                        
+                        if successful_renders:
+                            self.write_message(f"🎉 {len(successful_renders)} renders completed successfully:")
+                            for render in successful_renders:
+                                fabric = render['fabric']
+                                asset = render['asset']
+                                output_path = render['output_path']
+                                self.write_message(f"  ✅ {fabric} × {asset}: {output_path}")
+                        
+                        if failed_renders:
+                            self.write_message(f"❌ {len(failed_renders)} renders failed:")
+                            for render in failed_renders:
+                                fabric = render['fabric']
+                                asset = render['asset']
+                                error = render['error']
+                                self.write_message(f"  ❌ {fabric} × {asset}: {error}")
+                        
+                        if not successful_renders and not failed_renders:
+                            self.write_message("🛑 No renders completed")
                         
                 except Exception as e:
                     self.write_message(f"❌ Batch render failed: {e}")
                 finally:
-                    # Stop log streaming for batch rendering
-                    if self.current_log_task:
-                        self.current_log_task.cancel()
-                        self.current_log_task = None
+                    # Clean up for synchronous batch rendering
+                    pass
             
             self.write_message("📄 Log file preserved for debugging")
             

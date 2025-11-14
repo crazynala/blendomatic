@@ -262,7 +262,7 @@ except Exception as e:
         
         try:
             # Use detached execution for render operations unless explicitly disabled
-            if command in ['render', 'render_with_config']:
+            if command in ['render', 'render_with_config', 'render_multiple_configs']:
                 # Check if synchronous execution is requested
                 force_sync = args.get('force_synchronous', False)
                 if force_sync:
@@ -556,13 +556,29 @@ class BlenderTUISession:
             raise Exception(result['error'])
     
     def render_multiple_configs(self, configs: List[Dict]) -> Dict:
-        """Render multiple fabric x asset combinations sequentially in the same Blender process"""
+        """Render multiple fabric x asset combinations sequentially in the same Blender process (detached)"""
         # Pass the log file path so batch rendering can write to it
         log_file_path = self.bridge.get_log_file_path()
         result = self.bridge.execute_command('render_multiple_configs', {
             'configs': configs,
             'log_file': log_file_path
         })
+        if result['success']:
+            self._refresh_state()
+            return result  # Return full result dict for detached rendering
+        else:
+            raise Exception(result['error'])
+
+    def render_multiple_configs_sync(self, configs: List[Dict]) -> Dict:
+        """Render multiple fabric x asset combinations sequentially synchronously (waits for completion)"""
+        # Add flag to force synchronous execution
+        log_file_path = self.bridge.get_log_file_path()
+        sync_args = {
+            'configs': configs,
+            'log_file': log_file_path,
+            'force_synchronous': True
+        }
+        result = self.bridge.execute_command('render_multiple_configs', sync_args)
         if result['success']:
             self._refresh_state()
             return result['result']
