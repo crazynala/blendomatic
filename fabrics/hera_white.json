@@ -3,7 +3,7 @@
   "lighting_scene": "scenes/base_scene_light.blend",
   "materials": {
     "main_fabric": {
-      "match_name": "cotton",
+      "match_name": "fabric",
       "textures": {
         "base_color": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Hera White Texture/Hera White V2_albedo.png",
         "normal": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Hera White Texture/Hera White V2_normal.png",
