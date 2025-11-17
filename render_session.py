@@ -204,8 +204,21 @@ class RenderSession:
             if not self.garment: missing.append("garment")
             if not self.fabric: missing.append("fabric")
             if not self.asset: missing.append("asset")
+            if not self.material: missing.append("material")
             if not self._garment_loaded: missing.append("garment blend file")
             if not self._fabric_applied: missing.append("fabric material")
+            
+            print(f"[RENDER_ERROR] Missing components for render:")
+            for component in missing:
+                print(f"[RENDER_ERROR]   - {component}")
+            print(f"[RENDER_ERROR] Current state:")
+            print(f"[RENDER_ERROR]   mode: {self.mode}")
+            print(f"[RENDER_ERROR]   garment: {self.garment.get('name') if self.garment else None}")
+            print(f"[RENDER_ERROR]   fabric: {self.fabric.get('name') if self.fabric else None}")
+            print(f"[RENDER_ERROR]   asset: {self.asset.get('name') if self.asset else None}")
+            print(f"[RENDER_ERROR]   material: {self.material.name if self.material else None}")
+            print(f"[RENDER_ERROR]   garment_loaded: {self._garment_loaded}")
+            print(f"[RENDER_ERROR]   fabric_applied: {self._fabric_applied}")
             
             raise RuntimeError(f"Missing components: {', '.join(missing)}")
         
