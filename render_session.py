@@ -688,3 +688,74 @@ class RenderSession:
                                     print(f"[DEBUG_RENDER]       Texture: {img.name if img else 'None'} ({img.filepath if img else 'No path'})")
                     else:
                         print(f"[DEBUG_RENDER]     Base Color: {base_color_socket.default_value}")
+        
+        # Check lighting configuration
+        print(f"[DEBUG_RENDER] Lighting configuration:")
+        scene = bpy.context.scene
+        world = scene.world
+        
+        if world:
+            print(f"[DEBUG_RENDER]   World material: {world.name}")
+            if world.use_nodes:
+                print(f"[DEBUG_RENDER]   World uses nodes: True")
+                # Check for background shader and its settings
+                for node in world.node_tree.nodes:
+                    if node.type == 'BACKGROUND':
+                        print(f"[DEBUG_RENDER]     Background node found: {node.name}")
+                        color_input = node.inputs.get("Color")
+                        strength_input = node.inputs.get("Strength")
+                        if color_input:
+                            if color_input.links:
+                                from_node = color_input.links[0].from_node
+                                print(f"[DEBUG_RENDER]       Color linked to: {from_node.type} ({from_node.name})")
+                                if from_node.type == 'TEX_ENVIRONMENT':
+                                    img = from_node.image
+                                    print(f"[DEBUG_RENDER]         Environment texture: {img.name if img else 'None'} ({img.filepath if img else 'No path'})")
+                                    if img:
+                                        exists = os.path.exists(bpy.path.abspath(img.filepath))
+                                        print(f"[DEBUG_RENDER]         Texture exists: {exists}, size: {img.size[0]}x{img.size[1]}")
+                            else:
+                                print(f"[DEBUG_RENDER]       Color: {color_input.default_value}")
+                        if strength_input:
+                            print(f"[DEBUG_RENDER]       Strength: {strength_input.default_value}")
+            else:
+                print(f"[DEBUG_RENDER]   World uses nodes: False")
+                print(f"[DEBUG_RENDER]   World color: {world.color}")
+        else:
+            print(f"[DEBUG_RENDER]   No world material found")
+        
+        # Check light objects in scene
+        lights = [obj for obj in bpy.data.objects if obj.type == 'LIGHT']
+        print(f"[DEBUG_RENDER]   Light objects in scene: {len(lights)}")
+        for light_obj in lights:
+            light = light_obj.data
+            print(f"[DEBUG_RENDER]     Light '{light_obj.name}': type={light.type}, energy={light.energy}, color={light.color}, visible={not light_obj.hide_render}")
+            if hasattr(light, 'size'):
+                print(f"[DEBUG_RENDER]       Size: {light.size}")
+            if hasattr(light, 'angle') and light.type == 'SPOT':
+                print(f"[DEBUG_RENDER]       Spot angle: {light.angle}")
+        
+        # Check render settings that might affect lighting
+        print(f"[DEBUG_RENDER] Render settings:")
+        print(f"[DEBUG_RENDER]   Engine: {scene.render.engine}")
+        if scene.render.engine == 'CYCLES':
+            print(f"[DEBUG_RENDER]   Samples: {scene.cycles.samples}")
+            print(f"[DEBUG_RENDER]   Max bounces: {scene.cycles.max_bounces}")
+            print(f"[DEBUG_RENDER]   Diffuse bounces: {scene.cycles.diffuse_bounces}")
+            print(f"[DEBUG_RENDER]   Glossy bounces: {scene.cycles.glossy_bounces}")
+            print(f"[DEBUG_RENDER]   Transmission bounces: {scene.cycles.transmission_bounces}")
+            print(f"[DEBUG_RENDER]   Volume bounces: {scene.cycles.volume_bounces}")
+            print(f"[DEBUG_RENDER]   Transparent bounces: {scene.cycles.transparent_max_bounces}")
+        
+        # Check color management
+        print(f"[DEBUG_RENDER] Color management:")
+        color_mgmt = scene.view_settings
+        print(f"[DEBUG_RENDER]   View transform: {color_mgmt.view_transform}")
+        print(f"[DEBUG_RENDER]   Look: {color_mgmt.look}")
+        print(f"[DEBUG_RENDER]   Exposure: {color_mgmt.exposure}")
+        print(f"[DEBUG_RENDER]   Gamma: {color_mgmt.gamma}")
+        
+        seq_editor = scene.sequence_editor_color_space if hasattr(scene, 'sequence_editor_color_space') else 'N/A'
+        display_device = scene.display_settings.display_device if hasattr(scene, 'display_settings') else 'N/A'
+        print(f"[DEBUG_RENDER]   Display device: {display_device}")
+        print(f"[DEBUG_RENDER]   Sequencer color space: {seq_editor}")
