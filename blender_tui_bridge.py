@@ -25,7 +25,16 @@ class BlenderBridge:
         self.config_file = self.temp_dir / "config.json"
         self.result_file = self.temp_dir / "result.json"
         self.script_file = self.temp_dir / "blender_script.py"
-        self.log_file = self.temp_dir / "blender.log"
+        
+        # Create logs directory in project root
+        project_root = Path(__file__).parent
+        self.logs_dir = project_root / "logs"
+        self.logs_dir.mkdir(exist_ok=True)
+        
+        # Create timestamped log file in logs directory
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.log_file = self.logs_dir / f"blender_{timestamp}.log"
         
         # Generate the Blender script that will be executed
         self._create_blender_script()
@@ -39,6 +48,8 @@ class BlenderBridge:
         self.render_pid = None
         
         print(f"[BRIDGE] Temp directory: {self.temp_dir}")
+        print(f"[BRIDGE] Logs directory: {self.logs_dir}")
+        print(f"[BRIDGE] Log file: {self.log_file}")
     
     def _create_blender_script(self):
         """Create the Python script that will run inside Blender"""
@@ -340,7 +351,11 @@ except Exception as e:
         # Create dedicated config and result files for render to avoid conflicts
         render_config_file = self.temp_dir / "render_config.json"
         render_result_file = self.temp_dir / "render_result.json" 
-        render_log_file = self.temp_dir / "render.log"
+        
+        # Create dedicated log file for this render in logs directory
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+        render_log_file = self.logs_dir / f"render_{command}_{timestamp}.log"
         
         # Write render configuration to dedicated file
         config = {

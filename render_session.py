@@ -301,69 +301,146 @@ class RenderSession:
         print(f"[RENDER_SETTINGS] ✅ All render settings applied successfully", flush=True)
     
     def _apply_fabric_material(self, fabric: Dict):
-        """Update existing materials in the Blender file with fabric textures"""
+        """Update existing materials in the Blender file with fabric textures and parameters."""
         print(f"[FABRIC] Applying fabric '{fabric['name']}' to existing materials")
-        
-        # Get fabric texture paths
-        textures = fabric.get("textures", {})
-        material_params = fabric.get("material_params", {})
-        
+
+        textures = fabric.get("textures", {}) or {}
+        material_params = fabric.get("material_params", {}) or {}
+
         print(f"[FABRIC] Available textures: {list(textures.keys())}")
         print(f"[FABRIC] Material params: {material_params}")
-        
-        # Find and update existing materials
+
+        def load_or_get_image(path: str):
+            """Load an image once, reuse if already loaded with same filepath."""
+            if not path or not os.path.exists(path):
+                print(f"[FABRIC]   ⚠ Texture path does not exist: {path}")
+                return None
+
+            abspath = os.path.abspath(path)
+            # Try to find an existing image with same filepath
+            for img in bpy.data.images:
+                try:
+                    if os.path.abspath(bpy.path.abspath(img.filepath)) == abspath:
+                        print(f"[FABRIC]   Reusing already loaded image: {img.name}")
+                        return img
+                except Exception:
+                    continue
+
+            print(f"[FABRIC]   Loading image from disk: {abspath}")
+            return bpy.data.images.load(abspath)
+
+        def find_principled_bsdf(nodes):
+            """Find a Principled BSDF node by name or by type."""
+            bsdf = nodes.get("Principled BSDF")
+            if bsdf and bsdf.type == 'BSDF_PRINCIPLED':
+                return bsdf
+            for n in nodes:
+                if n.type == 'BSDF_PRINCIPLED':
+                    return n
+            return None
+
+        def update_socket_texture(socket, tex_key: str):
+            """Follow a socket link and set the image on the source TEX_IMAGE node if present."""
+            if tex_key not in textures:
+                return
+
+            tex_path = textures[tex_key]
+            if not socket.links:
+                print(f"[FABRIC]     No links on socket '{socket.name}' for texture '{tex_key}'")
+                return
+
+            from_node = socket.links[0].from_node
+            if from_node.type == 'TEX_IMAGE':
+                img = load_or_get_image(tex_path)
+                if img:
+                    from_node.image = img
+                    print(f"[FABRIC]     Socket '{socket.name}' → node '{from_node.name}' set to '{tex_key}'")
+            else:
+                print(f"[FABRIC]     Linked node for socket '{socket.name}' is not TEX_IMAGE: {from_node.type} ({from_node.name})")
+
+        def find_material_output(nodes):
+            """Find the main Material Output node."""
+            for n in nodes:
+                if n.type == 'OUTPUT_MATERIAL':
+                    return n
+            return None
+
         materials_updated = []
+
         for mat in bpy.data.materials:
             if not mat.use_nodes:
                 print(f"[FABRIC] Skipping material '{mat.name}' - no node tree")
                 continue
-                
+
             print(f"[FABRIC] Updating material: {mat.name}")
             nodes = mat.node_tree.nodes
-            
-            # Update texture nodes by looking for Image Texture nodes with specific labels or names
-            for node in nodes:
-                if node.type == 'TEX_IMAGE':
-                    # Check if this is a texture node we should update based on label or name
-                    node_label = node.label.lower() if node.label else ""
-                    node_name = node.name.lower()
-                    
-                    # Update base color texture
-                    if any(keyword in node_label or keyword in node_name for keyword in ['base', 'color', 'diffuse', 'albedo']):
-                        if "base_color" in textures and os.path.exists(textures["base_color"]):
-                            print(f"[FABRIC]   Loading base color texture: {textures['base_color']}")
-                            node.image = bpy.data.images.load(textures["base_color"])
-                    
-                    # Update roughness texture
-                    elif any(keyword in node_label or keyword in node_name for keyword in ['roughness', 'rough']):
-                        if "roughness" in textures and os.path.exists(textures["roughness"]):
-                            print(f"[FABRIC]   Loading roughness texture: {textures['roughness']}")
-                            node.image = bpy.data.images.load(textures["roughness"])
-                    
-                    # Update normal texture
-                    elif any(keyword in node_label or keyword in node_name for keyword in ['normal', 'norm']):
-                        if "normal" in textures and os.path.exists(textures["normal"]):
-                            print(f"[FABRIC]   Loading normal texture: {textures['normal']}")
-                            node.image = bpy.data.images.load(textures["normal"])
-            
-            # Update Principled BSDF parameters if available
-            bsdf = nodes.get("Principled BSDF")
-            if bsdf:
-                if "metallic" in material_params:
-                    bsdf.inputs["Metallic"].default_value = material_params["metallic"]
-                    print(f"[FABRIC]   Set metallic: {material_params['metallic']}")
-                if "roughness" in material_params:
-                    bsdf.inputs["Roughness"].default_value = material_params["roughness"]
-                    print(f"[FABRIC]   Set roughness: {material_params['roughness']}")
-                if "alpha" in material_params:
-                    bsdf.inputs["Alpha"].default_value = material_params["alpha"]
-                    print(f"[FABRIC]   Set alpha: {material_params['alpha']}")
-            
+
+            bsdf = find_principled_bsdf(nodes)
+            if not bsdf:
+                print(f"[FABRIC]   No Principled BSDF found in '{mat.name}', skipping")
+                continue
+
+            # --- NUMERIC PARAMS (stitch-style materials or overrides) ---
+            # Base color (expects RGBA list or tuple)
+            if "base_color" in material_params:
+                try:
+                    bc = material_params["base_color"]
+                    # Ensure 4 components
+                    if len(bc) == 3:
+                        bc = list(bc) + [1.0]
+                    bsdf.inputs["Base Color"].default_value = bc
+                    print(f"[FABRIC]   Set Base Color: {bc}")
+                except Exception as e:
+                    print(f"[FABRIC]   ⚠ Failed to set Base Color: {e}")
+
+            if "metallic" in material_params:
+                bsdf.inputs["Metallic"].default_value = material_params["metallic"]
+                print(f"[FABRIC]   Set Metallic: {material_params['metallic']}")
+
+            if "roughness" in material_params:
+                bsdf.inputs["Roughness"].default_value = material_params["roughness"]
+                print(f"[FABRIC]   Set Roughness: {material_params['roughness']}")
+
+            if "ior" in material_params:
+                try:
+                    bsdf.inputs["IOR"].default_value = material_params["ior"]
+                    print(f"[FABRIC]   Set IOR: {material_params['ior']}")
+                except Exception as e:
+                    print(f"[FABRIC]   ⚠ Failed to set IOR: {e}")
+
+            if "alpha" in material_params:
+                bsdf.inputs["Alpha"].default_value = material_params["alpha"]
+                print(f"[FABRIC]   Set Alpha: {material_params['alpha']}")
+
+            # --- TEXTURE-DRIVEN PARAMS (fabric materials with linked nodes) ---
+            # Map JSON texture keys to BSDF sockets
+            bsdf_socket_map = {
+                "base_color": "Base Color",
+                "roughness": "Roughness",
+                "metallic": "Metallic",
+                "alpha": "Alpha",
+                "normal": "Normal",
+            }
+
+            for tex_key, socket_name in bsdf_socket_map.items():
+                if tex_key not in textures:
+                    continue
+                if socket_name not in bsdf.inputs:
+                    print(f"[FABRIC]   BSDF has no socket '{socket_name}'")
+                    continue
+
+                socket = bsdf.inputs[socket_name]
+                update_socket_texture(socket, tex_key)
+
+            # Displacement is usually on the Material Output
+            if "displacement" in textures:
+                out = find_material_output(nodes)
+                if out and "Displacement" in out.inputs:
+                    update_socket_texture(out.inputs["Displacement"], "displacement")
+
             materials_updated.append(mat.name)
-        
+
         print(f"[FABRIC] Updated {len(materials_updated)} materials: {materials_updated}")
-        
-        # Return the first updated material, or None if no materials were found
         return bpy.data.materials[materials_updated[0]] if materials_updated else None
     
     def _configure_mesh_object(self, mesh_config: Dict) -> None:
