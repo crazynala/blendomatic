@@ -2,7 +2,9 @@
   "name": "Hera White",
   "lighting_scene": "scenes/base_scene_light.blend",
   "textures": {
-    "base_color": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Hera White Texture/Hera White V2_albedo.png"
+    "base_color": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Hera White Texture/Hera White V2_albedo.png",
+    "normal": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Hera White Texture/Hera White V2_normal.png",
+    "roughness": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Hera White Texture/Hera White V2_rough.exr"
   },
   "material_params": {
     "metallic": 0.0,
