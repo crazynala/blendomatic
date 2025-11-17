@@ -200,6 +200,10 @@ class RenderSession:
     
     def render(self) -> str:
         """Perform render with current settings"""
+        # Debug render state before rendering
+        print("[RENDER] Starting render process - debugging current state:")
+        self.debug_render_state()
+        
         if not self.is_ready_to_render():
             missing = []
             if not self.mode: missing.append("mode")
@@ -645,3 +649,42 @@ class RenderSession:
                             print(f"[DEBUG]     Material slot {i}: <empty>")
                 else:
                     print(f"[DEBUG]     No materials assigned")
+
+    def debug_render_state(self):
+        """Debug the state right before rendering"""
+        print(f"[DEBUG_RENDER] Pre-render state check:")
+        
+        # Check if textures are actually loaded and valid
+        print(f"[DEBUG_RENDER] Loaded images in scene:")
+        for img in bpy.data.images:
+            if img.filepath:
+                exists = os.path.exists(bpy.path.abspath(img.filepath))
+                print(f"[DEBUG_RENDER]   {img.name}: {img.filepath} (exists: {exists}, size: {img.size[0]}x{img.size[1]})")
+        
+        # Check material nodes for the main fabric materials  
+        print(f"[DEBUG_RENDER] Main fabric material node states:")
+        for mat_name in ['fabric', 'fabric.001', 'fabric.002']:
+            mat = bpy.data.materials.get(mat_name)
+            if mat and mat.use_nodes:
+                print(f"[DEBUG_RENDER]   Material '{mat_name}':")
+                bsdf = None
+                for node in mat.node_tree.nodes:
+                    if node.type == 'BSDF_PRINCIPLED':
+                        bsdf = node
+                        break
+                
+                if bsdf:
+                    # Check Base Color connection
+                    base_color_socket = bsdf.inputs["Base Color"]
+                    if base_color_socket.links:
+                        from_node = base_color_socket.links[0].from_node
+                        print(f"[DEBUG_RENDER]     Base Color linked to: {from_node.type} ({from_node.name})")
+                        if from_node.type == 'HUE_SAT':
+                            print(f"[DEBUG_RENDER]       HUE_SAT settings - Hue: {from_node.inputs['Hue'].default_value}, Sat: {from_node.inputs['Saturation'].default_value}, Val: {from_node.inputs['Value'].default_value}, Fac: {from_node.inputs['Fac'].default_value}")
+                            if from_node.inputs["Color"].links:
+                                tex_node = from_node.inputs["Color"].links[0].from_node
+                                if tex_node.type == 'TEX_IMAGE':
+                                    img = tex_node.image
+                                    print(f"[DEBUG_RENDER]       Texture: {img.name if img else 'None'} ({img.filepath if img else 'No path'})")
+                    else:
+                        print(f"[DEBUG_RENDER]     Base Color: {base_color_socket.default_value}")
