@@ -304,11 +304,34 @@ class RenderSession:
         """Update existing materials in the Blender file with fabric textures and parameters."""
         print(f"[FABRIC] Applying fabric '{fabric['name']}' to existing materials")
 
-        textures = fabric.get("textures", {}) or {}
-        material_params = fabric.get("material_params", {}) or {}
+        # Support new multi-material structure or legacy single material structure
+        materials_config = fabric.get("materials", {})
+        if not materials_config:
+            # Legacy format - convert to new format
+            materials_config = {
+                "default": {
+                    "match_name": "",  # Empty match means apply to all materials
+                    "textures": fabric.get("textures", {}),
+                    "material_params": fabric.get("material_params", {}),
+                    "hue_sat_params": {}
+                }
+            }
 
-        print(f"[FABRIC] Available textures: {list(textures.keys())}")
-        print(f"[FABRIC] Material params: {material_params}")
+        print(f"[FABRIC] Material configurations: {list(materials_config.keys())}")
+        
+        for config_name, config in materials_config.items():
+            print(f"[FABRIC] Processing config '{config_name}': {config}")
+            
+            match_name = config.get("match_name", "").lower()
+            textures = config.get("textures", {}) or {}
+            material_params = config.get("material_params", {}) or {}
+            hue_sat_params = config.get("hue_sat_params", {}) or {}
+
+            print(f"[FABRIC] Config '{config_name}' - Match: '{match_name}', Textures: {list(textures.keys())}, Params: {material_params}")
+            if hue_sat_params:
+                print(f"[FABRIC] Config '{config_name}' - HUE_SAT params: {hue_sat_params}")
+
+        materials_updated = []
 
         def load_or_get_image(path: str):
             """Load an image once, reuse if already loaded with same filepath."""
@@ -339,12 +362,12 @@ class RenderSession:
                     return n
             return None
 
-        def update_socket_texture(socket, tex_key: str):
+        def update_socket_texture(socket, tex_key: str, textures_dict: dict):
             """Follow a socket link and set the image on the source TEX_IMAGE node if present."""
-            if tex_key not in textures:
+            if tex_key not in textures_dict:
                 return
 
-            tex_path = textures[tex_key]
+            tex_path = textures_dict[tex_key]
             if not socket.links:
                 print(f"[FABRIC]     No links on socket '{socket.name}' for texture '{tex_key}'")
                 return
@@ -355,8 +378,48 @@ class RenderSession:
                 if img:
                     from_node.image = img
                     print(f"[FABRIC]     Socket '{socket.name}' → node '{from_node.name}' set to '{tex_key}'")
+            elif from_node.type == 'HUE_SAT':
+                # Navigate to the Color socket of the HUE_SAT node
+                print(f"[FABRIC]     Found HUE_SAT node '{from_node.name}' on socket '{socket.name}'")
+                if "Color" in from_node.inputs and from_node.inputs["Color"].links:
+                    color_from_node = from_node.inputs["Color"].links[0].from_node
+                    if color_from_node.type == 'TEX_IMAGE':
+                        img = load_or_get_image(tex_path)
+                        if img:
+                            color_from_node.image = img
+                            print(f"[FABRIC]     HUE_SAT '{from_node.name}' → TEX_IMAGE '{color_from_node.name}' set to '{tex_key}'")
+                    else:
+                        print(f"[FABRIC]     HUE_SAT Color input not linked to TEX_IMAGE: {color_from_node.type}")
+                else:
+                    print(f"[FABRIC]     HUE_SAT node has no Color input or no links")
             else:
-                print(f"[FABRIC]     Linked node for socket '{socket.name}' is not TEX_IMAGE: {from_node.type} ({from_node.name})")
+                print(f"[FABRIC]     Linked node for socket '{socket.name}' is not TEX_IMAGE or HUE_SAT: {from_node.type} ({from_node.name})")
+
+        def update_hue_sat_node(socket, hue_sat_params_dict: dict):
+            """Update HUE_SAT node parameters if found on the socket."""
+            if not socket.links or not hue_sat_params_dict:
+                return
+            
+            from_node = socket.links[0].from_node
+            if from_node.type == 'HUE_SAT':
+                print(f"[FABRIC]     Updating HUE_SAT node '{from_node.name}' on socket '{socket.name}'")
+                
+                # Update HUE_SAT parameters
+                if "hue" in hue_sat_params_dict:
+                    from_node.inputs["Hue"].default_value = hue_sat_params_dict["hue"]
+                    print(f"[FABRIC]       Set Hue: {hue_sat_params_dict['hue']}")
+                
+                if "saturation" in hue_sat_params_dict:
+                    from_node.inputs["Saturation"].default_value = hue_sat_params_dict["saturation"]
+                    print(f"[FABRIC]       Set Saturation: {hue_sat_params_dict['saturation']}")
+                
+                if "value" in hue_sat_params_dict:
+                    from_node.inputs["Value"].default_value = hue_sat_params_dict["value"]
+                    print(f"[FABRIC]       Set Value: {hue_sat_params_dict['value']}")
+
+        def should_apply_numeric_value(socket):
+            """Check if we should apply a numeric value (socket not connected to other nodes)."""
+            return not socket.links
 
         def find_material_output(nodes):
             """Find the main Material Output node."""
@@ -365,80 +428,95 @@ class RenderSession:
                     return n
             return None
 
-        materials_updated = []
-
-        for mat in bpy.data.materials:
-            if not mat.use_nodes:
-                print(f"[FABRIC] Skipping material '{mat.name}' - no node tree")
-                continue
-
-            print(f"[FABRIC] Updating material: {mat.name}")
-            nodes = mat.node_tree.nodes
-
-            bsdf = find_principled_bsdf(nodes)
-            if not bsdf:
-                print(f"[FABRIC]   No Principled BSDF found in '{mat.name}', skipping")
-                continue
-
-            # --- NUMERIC PARAMS (stitch-style materials or overrides) ---
-            # Base color (expects RGBA list or tuple)
-            if "base_color" in material_params:
-                try:
-                    bc = material_params["base_color"]
-                    # Ensure 4 components
-                    if len(bc) == 3:
-                        bc = list(bc) + [1.0]
-                    bsdf.inputs["Base Color"].default_value = bc
-                    print(f"[FABRIC]   Set Base Color: {bc}")
-                except Exception as e:
-                    print(f"[FABRIC]   ⚠ Failed to set Base Color: {e}")
-
-            if "metallic" in material_params:
-                bsdf.inputs["Metallic"].default_value = material_params["metallic"]
-                print(f"[FABRIC]   Set Metallic: {material_params['metallic']}")
-
-            if "roughness" in material_params:
-                bsdf.inputs["Roughness"].default_value = material_params["roughness"]
-                print(f"[FABRIC]   Set Roughness: {material_params['roughness']}")
-
-            if "ior" in material_params:
-                try:
-                    bsdf.inputs["IOR"].default_value = material_params["ior"]
-                    print(f"[FABRIC]   Set IOR: {material_params['ior']}")
-                except Exception as e:
-                    print(f"[FABRIC]   ⚠ Failed to set IOR: {e}")
-
-            if "alpha" in material_params:
-                bsdf.inputs["Alpha"].default_value = material_params["alpha"]
-                print(f"[FABRIC]   Set Alpha: {material_params['alpha']}")
-
-            # --- TEXTURE-DRIVEN PARAMS (fabric materials with linked nodes) ---
-            # Map JSON texture keys to BSDF sockets
-            bsdf_socket_map = {
-                "base_color": "Base Color",
-                "roughness": "Roughness",
-                "metallic": "Metallic",
-                "alpha": "Alpha",
-                "normal": "Normal",
-            }
-
-            for tex_key, socket_name in bsdf_socket_map.items():
-                if tex_key not in textures:
-                    continue
-                if socket_name not in bsdf.inputs:
-                    print(f"[FABRIC]   BSDF has no socket '{socket_name}'")
+            for mat in bpy.data.materials:
+                if not mat.use_nodes:
+                    print(f"[FABRIC] Skipping material '{mat.name}' - no node tree")
                     continue
 
-                socket = bsdf.inputs[socket_name]
-                update_socket_texture(socket, tex_key)
+                # Check if this material matches the current config
+                if match_name and match_name not in mat.name.lower():
+                    print(f"[FABRIC] Skipping material '{mat.name}' - doesn't match '{match_name}'")
+                    continue
 
-            # Displacement is usually on the Material Output
-            if "displacement" in textures:
-                out = find_material_output(nodes)
-                if out and "Displacement" in out.inputs:
-                    update_socket_texture(out.inputs["Displacement"], "displacement")
+                print(f"[FABRIC] Updating material: {mat.name} (config: {config_name})")
+                nodes = mat.node_tree.nodes
 
-            materials_updated.append(mat.name)
+                bsdf = find_principled_bsdf(nodes)
+                if not bsdf:
+                    print(f"[FABRIC]   No Principled BSDF found in '{mat.name}', skipping")
+                    continue
+
+                # --- NUMERIC PARAMS (stitch-style materials or overrides) ---
+                # Base color (expects RGBA list or tuple)
+                if "base_color" in material_params:
+                    if should_apply_numeric_value(bsdf.inputs["Base Color"]):
+                        try:
+                            bc = material_params["base_color"]
+                            # Ensure 4 components
+                            if len(bc) == 3:
+                                bc = list(bc) + [1.0]
+                            bsdf.inputs["Base Color"].default_value = bc
+                            print(f"[FABRIC]   Set Base Color: {bc}")
+                        except Exception as e:
+                            print(f"[FABRIC]   ⚠ Failed to set Base Color: {e}")
+                    else:
+                        print(f"[FABRIC]   Skipping Base Color (socket connected)")
+
+                if "metallic" in material_params and should_apply_numeric_value(bsdf.inputs["Metallic"]):
+                    bsdf.inputs["Metallic"].default_value = material_params["metallic"]
+                    print(f"[FABRIC]   Set Metallic: {material_params['metallic']}")
+                elif "metallic" in material_params:
+                    print(f"[FABRIC]   Skipping Metallic (socket connected)")
+
+                if "roughness" in material_params and should_apply_numeric_value(bsdf.inputs["Roughness"]):
+                    bsdf.inputs["Roughness"].default_value = material_params["roughness"]
+                    print(f"[FABRIC]   Set Roughness: {material_params['roughness']}")
+                elif "roughness" in material_params:
+                    print(f"[FABRIC]   Skipping Roughness (socket connected)")
+
+                if "ior" in material_params:
+                    try:
+                        bsdf.inputs["IOR"].default_value = material_params["ior"]
+                        print(f"[FABRIC]   Set IOR: {material_params['ior']}")
+                    except Exception as e:
+                        print(f"[FABRIC]   ⚠ Failed to set IOR: {e}")
+
+                if "alpha" in material_params and should_apply_numeric_value(bsdf.inputs["Alpha"]):
+                    bsdf.inputs["Alpha"].default_value = material_params["alpha"]
+                    print(f"[FABRIC]   Set Alpha: {material_params['alpha']}")
+                elif "alpha" in material_params:
+                    print(f"[FABRIC]   Skipping Alpha (socket connected)")
+
+                # --- TEXTURE-DRIVEN PARAMS (fabric materials with linked nodes) ---
+                # Map JSON texture keys to BSDF sockets
+                bsdf_socket_map = {
+                    "base_color": "Base Color",
+                    "roughness": "Roughness", 
+                    "metallic": "Metallic",
+                    "alpha": "Alpha",
+                    "normal": "Normal",
+                }
+
+                for tex_key, socket_name in bsdf_socket_map.items():
+                    if tex_key not in textures:
+                        continue
+                    if socket_name not in bsdf.inputs:
+                        print(f"[FABRIC]   BSDF has no socket '{socket_name}'")
+                        continue
+
+                    socket = bsdf.inputs[socket_name]
+                    update_socket_texture(socket, tex_key, textures)
+                    
+                    # Also update HUE_SAT parameters if present
+                    update_hue_sat_node(socket, hue_sat_params)
+
+                # Displacement is usually on the Material Output
+                if "displacement" in textures:
+                    out = find_material_output(nodes)
+                    if out and "Displacement" in out.inputs:
+                        update_socket_texture(out.inputs["Displacement"], "displacement", textures)
+
+                materials_updated.append(mat.name)
 
         print(f"[FABRIC] Updated {len(materials_updated)} materials: {materials_updated}")
         return bpy.data.materials[materials_updated[0]] if materials_updated else None

@@ -1,14 +1,35 @@
 {
   "name": "Hera White",
   "lighting_scene": "scenes/base_scene_light.blend",
-  "textures": {
-    "base_color": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Hera White Texture/Hera White V2_albedo.png",
-    "normal": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Hera White Texture/Hera White V2_normal.png",
-    "roughness": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Hera White Texture/Hera White V2_rough.exr"
-  },
-  "material_params": {
-    "metallic": 0.0,
-    "roughness": 0.1,
-    "alpha": 1.0
+  "materials": {
+    "main_fabric": {
+      "match_name": "cotton",
+      "textures": {
+        "base_color": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Hera White Texture/Hera White V2_albedo.png",
+        "normal": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Hera White Texture/Hera White V2_normal.png",
+        "roughness": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Hera White Texture/Hera White V2_rough.exr"
+      },
+      "material_params": {
+        "metallic": 0.0,
+        "ior": 1.45
+      },
+      "hue_sat_params": {
+        "hue": 0.5,
+        "saturation": 1.0,
+        "value": 1.0
+      }
+    },
+    "topstitches": {
+      "match_name": "stitch",
+      "textures": {},
+      "material_params": {
+        "base_color": [0.9, 0.9, 0.88, 1.0],
+        "metallic": 0.0,
+        "roughness": 0.4,
+        "ior": 1.45,
+        "alpha": 1.0
+      },
+      "hue_sat_params": {}
+    }
   }
 }
