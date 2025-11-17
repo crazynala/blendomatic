@@ -170,6 +170,8 @@ class RenderSession:
         
         # Update existing materials in the Blender file with fabric textures
         self.material = self._apply_fabric_material(self.fabric)
+        self.debug_material_assignments()  # Add this line
+        self.fabric_applied = True
         
         # The materials are already assigned to objects in the Blender file,
         # so we don't need to reassign them - just update their textures
@@ -628,3 +630,18 @@ class RenderSession:
             self._configure_mesh_object(mesh)
         
         print(f"[ASSET_CONFIG] ✅ Asset '{asset['name']}' configured with {len(asset.get('meshes', []))} meshes", flush=True)
+    
+    def debug_material_assignments(self):
+        """Debug which materials are assigned to which objects"""
+        print(f"[DEBUG] Material assignments in scene:")
+        for obj in bpy.data.objects:
+            if obj.type == 'MESH' and not obj.hide_render:
+                print(f"[DEBUG]   Object '{obj.name}' (visible={not obj.hide_render}):")
+                if obj.data.materials:
+                    for i, mat in enumerate(obj.data.materials):
+                        if mat:
+                            print(f"[DEBUG]     Material slot {i}: {mat.name}")
+                        else:
+                            print(f"[DEBUG]     Material slot {i}: <empty>")
+                else:
+                    print(f"[DEBUG]     No materials assigned")
