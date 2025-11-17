@@ -13,9 +13,10 @@
         "ior": 1.45
       },
       "hue_sat_params": {
-        "hue": 0,
-        "saturation": 1.0,
-        "value": 1.0
+        "hue": 0.5,
+        "saturation": 1.5,
+        "value": 0.5,
+        "fac": 0.8
       }
     },
     "topstitches": {

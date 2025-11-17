@@ -429,7 +429,11 @@ class RenderSession:
                 if "value" in hue_sat_params_dict:
                     from_node.inputs["Value"].default_value = hue_sat_params_dict["value"]
                     print(f"[FABRIC]       Set Value: {hue_sat_params_dict['value']}")
-
+                
+                if "fac" in hue_sat_params_dict:
+                    from_node.inputs["Fac"].default_value = hue_sat_params_dict["fac"]
+                    print(f"[FABRIC]       Set Fac: {hue_sat_params_dict['fac']}")
+        
         def should_apply_numeric_value(socket):
             """Check if we should apply a numeric value (socket not connected to other nodes)."""
             return not socket.links
