@@ -3,7 +3,7 @@
     "fast": {
       "engine": "CYCLES",
       "device": "GPU",
-      "samples": 32,
+      "samples": 128,
       "preview_samples": 2,
       "adaptive_sampling": false,
       "adaptive_threshold": 0.1,
