@@ -729,13 +729,33 @@ class RenderSession:
                                         img = from_node.image
                                         print(f"[DEBUG_RENDER]         Environment texture: {img.name if img else 'None'} ({img.filepath if img else 'No path'})")
                                         if img:
+                                            abspath = bpy.path.abspath(img.filepath)
                                             try:
-                                                exists = os.path.exists(bpy.path.abspath(img.filepath))
-                                                print(f"[DEBUG_RENDER]         Texture exists: {exists}, size: {img.size[0]}x{img.size[1]}")
-                                            except:
-                                                print(f"[DEBUG_RENDER]         Texture path error")
-                                else:
-                                    print(f"[DEBUG_RENDER]       Color: {color_input.default_value}")
+                                                exists = os.path.exists(abspath)
+                                                file_bytes = os.path.getsize(abspath) if exists else -1
+                                            except Exception:
+                                                exists = False
+                                                file_bytes = -1
+                                            # Basic Blender image metadata
+                                            src = getattr(img, "source", "N/A")
+                                            fmt = getattr(img, "file_format", "N/A")
+                                            cs = getattr(img, "colorspace_settings", None)
+                                            cs_name = cs.name if cs else "N/A"
+                                            has_data = getattr(img, "has_data", None)
+                                            # sample first pixel if available
+                                            sample_color = None
+                                            try:
+                                                if hasattr(img, "pixels") and len(img.pixels) >= 4:
+                                                    sample_color = (img.pixels[0], img.pixels[1], img.pixels[2])
+                                            except Exception:
+                                                sample_color = None
+
+                                            print(f"[DEBUG_RENDER]         Texture exists: {exists}, on-disk bytes: {file_bytes}, image.size: {img.size[0]}x{img.size[1]}")
+                                            print(f"[DEBUG_RENDER]         Image source: {src}, file_format: {fmt}, colorspace: {cs_name}, has_data: {has_data}")
+                                            if sample_color:
+                                                print(f"[DEBUG_RENDER]         First pixel sample (R,G,B): {sample_color}")
+                                            else:
+                                                print(f"[DEBUG_RENDER]         No pixel sample available (image.pixels length: {len(img.pixels) if hasattr(img, 'pixels') else 'N/A'})")
                             if strength_input:
                                 print(f"[DEBUG_RENDER]       Strength: {strength_input.default_value}")
                 else:
