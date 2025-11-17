@@ -13,7 +13,7 @@
         "ior": 1.45
       },
       "hue_sat_params": {
-        "hue": 1.0,
+        "hue": 0.5,
         "saturation": 1.0,
         "value": 1.0,
         "fac": 1.0
