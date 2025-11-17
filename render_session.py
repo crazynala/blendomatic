@@ -168,6 +168,22 @@ class RenderSession:
         
         self.fabric = self._load_json(match)
         
+        # Debug: Log the actual loaded fabric config
+        print(f"[FABRIC_DEBUG] Current working directory: {os.getcwd()}")
+        print(f"[FABRIC_DEBUG] Loading fabric from: {os.path.abspath(match)}")
+        print(f"[FABRIC_DEBUG] File exists: {os.path.exists(match)}")
+        print(f"[FABRIC_DEBUG] Loaded fabric config from {match}:")
+        print(f"[FABRIC_DEBUG] Fabric name: {self.fabric.get('name', 'Unknown')}")
+        if 'materials' in self.fabric and 'main_fabric' in self.fabric['materials']:
+            main_fabric = self.fabric['materials']['main_fabric']
+            if 'hue_sat_params' in main_fabric:
+                hue_sat = main_fabric['hue_sat_params']
+                print(f"[FABRIC_DEBUG] HUE_SAT params from file: {hue_sat}")
+            else:
+                print(f"[FABRIC_DEBUG] No hue_sat_params found in main_fabric config")
+        else:
+            print(f"[FABRIC_DEBUG] No main_fabric config found")
+        
         # Update existing materials in the Blender file with fabric textures
         self.material = self._apply_fabric_material(self.fabric)
         self.debug_material_assignments()  # Add this line
@@ -691,38 +707,44 @@ class RenderSession:
         
         # Check lighting configuration
         print(f"[DEBUG_RENDER] Lighting configuration:")
-        scene = bpy.context.scene
-        world = scene.world
-        
-        if world:
-            print(f"[DEBUG_RENDER]   World material: {world.name}")
-            if world.use_nodes:
-                print(f"[DEBUG_RENDER]   World uses nodes: True")
-                # Check for background shader and its settings
-                for node in world.node_tree.nodes:
-                    if node.type == 'BACKGROUND':
-                        print(f"[DEBUG_RENDER]     Background node found: {node.name}")
-                        color_input = node.inputs.get("Color")
-                        strength_input = node.inputs.get("Strength")
-                        if color_input:
-                            if color_input.links:
-                                from_node = color_input.links[0].from_node
-                                print(f"[DEBUG_RENDER]       Color linked to: {from_node.type} ({from_node.name})")
-                                if from_node.type == 'TEX_ENVIRONMENT':
-                                    img = from_node.image
-                                    print(f"[DEBUG_RENDER]         Environment texture: {img.name if img else 'None'} ({img.filepath if img else 'No path'})")
-                                    if img:
-                                        exists = os.path.exists(bpy.path.abspath(img.filepath))
-                                        print(f"[DEBUG_RENDER]         Texture exists: {exists}, size: {img.size[0]}x{img.size[1]}")
-                            else:
-                                print(f"[DEBUG_RENDER]       Color: {color_input.default_value}")
-                        if strength_input:
-                            print(f"[DEBUG_RENDER]       Strength: {strength_input.default_value}")
+        try:
+            scene = bpy.context.scene
+            world = scene.world
+            
+            if world:
+                print(f"[DEBUG_RENDER]   World material: {world.name}")
+                if world.use_nodes:
+                    print(f"[DEBUG_RENDER]   World uses nodes: True")
+                    # Check for background shader and its settings
+                    for node in world.node_tree.nodes:
+                        if node.type == 'BACKGROUND':
+                            print(f"[DEBUG_RENDER]     Background node found: {node.name}")
+                            color_input = node.inputs.get("Color")
+                            strength_input = node.inputs.get("Strength")
+                            if color_input:
+                                if color_input.links:
+                                    from_node = color_input.links[0].from_node
+                                    print(f"[DEBUG_RENDER]       Color linked to: {from_node.type} ({from_node.name})")
+                                    if from_node.type == 'TEX_ENVIRONMENT':
+                                        img = from_node.image
+                                        print(f"[DEBUG_RENDER]         Environment texture: {img.name if img else 'None'} ({img.filepath if img else 'No path'})")
+                                        if img:
+                                            try:
+                                                exists = os.path.exists(bpy.path.abspath(img.filepath))
+                                                print(f"[DEBUG_RENDER]         Texture exists: {exists}, size: {img.size[0]}x{img.size[1]}")
+                                            except:
+                                                print(f"[DEBUG_RENDER]         Texture path error")
+                                else:
+                                    print(f"[DEBUG_RENDER]       Color: {color_input.default_value}")
+                            if strength_input:
+                                print(f"[DEBUG_RENDER]       Strength: {strength_input.default_value}")
+                else:
+                    print(f"[DEBUG_RENDER]   World uses nodes: False")
+                    print(f"[DEBUG_RENDER]   World color: {world.color}")
             else:
-                print(f"[DEBUG_RENDER]   World uses nodes: False")
-                print(f"[DEBUG_RENDER]   World color: {world.color}")
-        else:
-            print(f"[DEBUG_RENDER]   No world material found")
+                print(f"[DEBUG_RENDER]   No world material found")
+        except Exception as e:
+            print(f"[DEBUG_RENDER]   Error checking world lighting: {e}")
         
         # Check light objects in scene
         lights = [obj for obj in bpy.data.objects if obj.type == 'LIGHT']
