@@ -257,9 +257,27 @@ class RenderSession:
         
         # Render
         bpy.context.scene.render.filepath = outpath
-        print(f"[RENDER] Starting render: {filename}")
-        bpy.ops.render.render(write_still=True)
-        print(f"[RENDER] Completed: {outpath}")
+        
+        try:
+            # Debug render state before rendering
+            print("[RENDER] Starting render process - debugging current state:")
+            self.debug_render_state()
+            
+            print(f"[RENDER] Starting render: {filename}")
+            
+            # Save debug scene before rendering
+            debug_dir = Path("debug")
+            debug_dir.mkdir(exist_ok=True)
+            debug_path = debug_dir / f"debug_scene_{fabric_name}_{asset_suffix}.blend"
+            bpy.ops.wm.save_mainfile(filepath=str(debug_path))
+            print(f"[DEBUG] Saved debug scene to {debug_path}")
+            
+            bpy.ops.render.render(write_still=True)
+            print(f"[RENDER] Completed: {outpath}")
+            
+        except Exception as e:
+            print(f"[RENDER_ERROR] Render failed: {e}")
+            raise
         
         return outpath
     

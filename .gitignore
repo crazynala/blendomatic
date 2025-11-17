@@ -9,6 +9,9 @@ renders/
 # Log files
 logs/
 
+# Debug files
+debug/
+
 # C extensions
 *.so
 
