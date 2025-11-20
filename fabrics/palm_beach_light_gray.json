@@ -1,0 +1,35 @@
+{
+  "name": "Palm Beach Light Gray",
+  "lighting_scene": "scenes/base_scene_light.blend",
+  "materials": {
+    "main_fabric": {
+      "match_name": "fabric",
+      "textures": {
+        "base_color": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Palm Beach Light Gray Linen/light_gray_linen_Base_Color.tiff",
+        "normal": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Palm Beach Light Gray Linen/light_gray_linen_Normal.tiff",
+        "roughness": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Palm Beach Light Gray Linen/light_gray_linen_Roughness.tiff"
+      },
+      "material_params": {        
+        "ior": 1
+      },
+      "hue_sat_params": {
+        "hue": 0.5,
+        "saturation": 0,
+        "value": 0,
+        "fac": 0
+      }
+    },
+    "topstitches": {
+      "match_name": "stitch",
+      "textures": {},
+      "material_params": {
+        "base_color": [0.042 , 0.047, 0.053 , 1],
+        "metallic": 0.0,
+        "roughness": 0.83,
+        "ior": 1.5,
+        "alpha": 1.0
+      },
+      "hue_sat_params": {}
+    }
+  }
+}
