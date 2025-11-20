@@ -9,24 +9,24 @@
         "normal": "Fabrics/Hera White Texture/Hera White V2_normal.png",
         "roughness": "Fabrics/Hera White Texture/Hera White V2_rough.exr"
       },
-      "material_params": {
-        "ior": 1.45
+      "material_params": {        
+        "ior": 1
       },
       "hue_sat_params": {
-        "hue": 1.0,
-        "saturation": 1.0,
-        "value": 1.0,
-        "fac": 1.0
+        "hue": 0.5,
+        "saturation": 0,
+        "value": 0,
+        "fac": 0
       }
     },
     "topstitches": {
       "match_name": "stitch",
       "textures": {},
       "material_params": {
-        "base_color": [0.9, 0.9, 0.88, 1.0],
+        "base_color": [1, 1, 1, 1],
         "metallic": 0.0,
-        "roughness": 0.4,
-        "ior": 1.45,
+        "roughness": 0.83,
+        "ior": 1.5,
         "alpha": 1.0
       },
       "hue_sat_params": {}
