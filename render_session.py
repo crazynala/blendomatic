@@ -730,13 +730,21 @@ class RenderSession:
             # but operate directly on obj to avoid name lookup
             print(f"[MESH_APPLY] → Object '{obj.name}' applying config: {cfg}", flush=True)
 
-            # Render visibility
-            render_enabled = cfg.get("render", True)
+            # Normalize flags from config (support alternate keys)
+            holdout_enabled = bool(cfg.get("holdout", cfg.get("is_holdout", False)))
+            shadow_catcher_enabled = bool(cfg.get("shadow_catcher", cfg.get("is_shadow_catcher", False)))
+
+            # Render visibility: if not explicitly provided, presume True when holdout or shadow catcher enabled
+            if "render" in cfg:
+                render_enabled = bool(cfg.get("render"))
+            else:
+                render_enabled = True if (holdout_enabled or shadow_catcher_enabled) else True
+                if holdout_enabled or shadow_catcher_enabled:
+                    print("[MESH_APPLY]   render implied True due to holdout/shadow_catcher", flush=True)
             obj.hide_render = not render_enabled
             print(f"[MESH_APPLY]   render: {render_enabled} (hide_render: {obj.hide_render})", flush=True)
 
             # Holdout
-            holdout_enabled = cfg.get("holdout", False)
             if hasattr(obj, 'is_holdout'):
                 obj.is_holdout = holdout_enabled
                 print(f"[MESH_APPLY]   holdout: {holdout_enabled} (is_holdout: {obj.is_holdout})", flush=True)
@@ -744,7 +752,6 @@ class RenderSession:
                 print(f"[MESH_APPLY]   holdout: {holdout_enabled} (NOT APPLIED - unsupported)", flush=True)
 
             # Shadow catcher
-            shadow_catcher_enabled = cfg.get("shadow_catcher", False)
             if hasattr(obj, 'is_shadow_catcher'):
                 obj.is_shadow_catcher = shadow_catcher_enabled
                 print(f"[MESH_APPLY]   shadow_catcher: {shadow_catcher_enabled} (is_shadow_catcher: {obj.is_shadow_catcher})", flush=True)

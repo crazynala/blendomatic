@@ -9,62 +9,20 @@
       "meshes": [
         {
           "name": "Band Collar",
-          "render": true,
-          "holdout": false,
-          "shadow_catcher": false
-        },
-        {
-          "name": "Body LS.002",
-          "render": false
+          "render": true
         },
         {
           "name": "Body SS",
-          "render": true,
-          "holdout": false,
           "shadow_catcher": true
-        },
-        {
-          "name": "Reg Collar",
-          "render": false
         },
         {
           "name": "Placket",
-          "render": true,
-          "holdout": false,
           "shadow_catcher": true
         },
         {
-          "name": "Button.*",
-          "render": false
-        },
-        {
           "name": "Buttonhole_Collar",
-          "render": true,
-          "holdout": false,
-          "shadow_catcher": false
-        },
-        {
-          "name": "Buttonhole.Body.*",
-          "render": false
-      },
-      {
-        "name": "Buttoncollar",
-        "render": true,
-        "holdout": false,
-        "shadow_catcher": false
-      },
-      {
-        "name": "Buttonhole.Body.*",
-        "render": false
-    },
-    {
-      "name": "button_yarn",
-      "render": false
-  },
-  {
-    "name": "button_yarncollar",
-    "render": false
-  }
+          "render": true
+        }
       ]
     },
     {
@@ -72,59 +30,21 @@
       "suffix": "reg_collar",
       "meshes": [
         {
-          "name": "Band Collar",
-          "render": false
-        },
-        {
-          "name": "Body LS.002",
-          "render": false
-        },
-        {
           "name": "Body SS",
-          "render": true,
-          "holdout": false,
           "shadow_catcher": true
         },
         {
           "name": "Reg Collar",
-          "render": true,
-          "holdout": false,
-          "shadow_catcher": false
+          "render": true
         },
         {
           "name": "Placket",
-          "render": true,
-          "holdout": false,
           "shadow_catcher": true
         },
         {
-          "name": "Button.*",
-          "render": false
-        },
-        {
           "name": "Buttonhole_Collar",
-          "render": true,
-          "holdout": false,
-          "shadow_catcher": false
-        },
-        {
-          "name": "Buttonhole.Body.*",
-          "render": false
-      },
-      {
-        "name": "Buttoncollar",
-        "render": true,
-        "holdout": false,
-        "shadow_catcher": false
-      },
-	  {
-      "name": "button_yarn",
-      "render": false
-  },
-  {
-    "name": "button_yarncollar",
-    "render": false
-  }
+          "render": true
+        }
       ]
     },
     {
@@ -132,56 +52,9 @@
       "suffix": "Body_LS",
       "meshes": [
         {
-          "name": "Band Collar",
-          "render": false
-        },
-        {
           "name": "Body LS.002",
-          "render": true,
-          "show_in_viewport": true,
-          "holdout": false,
-          "shadow_catcher": false
-        },
-        {
-          "name": "Body SS",
-          "render": false
-        },
-        {
-          "name": "Reg Collar",
-          "render": false
-        },
-        {
-          "name": "Placket",
-          "render": false
-        },
-        {
-          "name": "Button.*",
-          "render": false
-        },
-        {
-          "name": "Buttonhole_Collar",
-          "render": true,
-          "holdout": false,
-          "shadow_catcher": false
-        },
-        {
-          "name": "Buttonhole.Body.*",
-          "render": false
-      },
-      {
-        "name": "Buttoncollar",
-        "render": true,
-        "holdout": false,
-        "shadow_catcher": false
-      },
-     {
-      "name": "button_yarn",
-      "render": false
-  },
-  {
-    "name": "button_yarncollar",
-    "render": false
-  }
+          "render": true
+        }
       ]
     },
     {
@@ -189,168 +62,45 @@
       "suffix": "Body_SS",
       "meshes": [
         {
-          "name": "Band Collar",
-          "render": false
-        },
-        {
-          "name": "Body LS.002",
-          "render": false
-        },
-        {
           "name": "Body SS",
-          "render": true,
-          "holdout": false,
-          "shadow_catcher": false
+          "render": true
         },
         {
-          "name": "Reg Collar",
-          "render": false
-        },
-        {
-          "name": "Placket",
-          "render": false
-        },
-        {
-          "name": "Button.*",
-          "render": false
-        },
-        {
-          "name": "Buttonhole_Collar",
-          "render": false
-        },
-        {
-          "name": "Buttonhole.Body.*",
-          "render": false
-      },
-      {
-        "name": "Buttoncollar",
-        "render": true,
-        "holdout": false,
-        "shadow_catcher": false
-      },
-    {
-      "name": "button_yarn",
-      "render": false
-  },
-  {
-    "name": "button_yarncollar",
-    "render": false
-  }
+          "name": "Buttoncollar",
+          "render": true
+        }
       ]
     },
     {
       "name": "Placket Variant",
-      "suffix": "placket",
+      "suffix": "placket-reg",
       "meshes": [
         {
-          "name": "Band Collar",
-          "render": false
-        },
-        {
-          "name": "Body LS.002",
-          "render": false
-        },
-        {
           "name": "Body SS",
-          "render": true,
-          "show_in_viewport": false,
-          "holdout": false,
           "shadow_catcher": true
         },
         {
-          "name": "Reg Collar",
-          "render": false
-        },
-        {
           "name": "Placket",
-          "render": true,
-          "show_in_viewport": true,
-          "holdout": false,
-          "shadow_catcher": false
-        },
-        {
-          "name": "Button.*",
           "render": true
-        },
-        {
-          "name": "Buttonhole_Collar",
-          "render": false
-          
         },
         {
           "name": "Buttonhole.Body.*",
           "render": true
-      },
-      {
-        "name": "Buttoncollar",
-        "render": true,
-        "holdout": false,
-        "shadow_catcher": false
-      },
-      {
-        "name": "button_yarn",
-        "render": true
-    },
-    {
-      "name": "button_yarncollar",
-      "render": false
-       }
+        }
       ]
     },
     {
-    "name": "Hidden Placket Variant",
-    "suffix": "placket",
-    "meshes": [
-      {
-        "name": "Band Collar",
-        "render": false
-      },
-      {
-        "name": "Body LS.002",
-        "render": false
-      },
-      {
-        "name": "Body SS",
-        "render": true,
-        "show_in_viewport": false,
-        "holdout": false,
-        "shadow_catcher": true
-      },
-      {
-        "name": "Reg Collar",
-        "render": false
-      },
-      {
-        "name": "Placket",
-        "render": true,
-        "holdout": false,
-        "shadow_catcher": false
-      },
-      {
-        "name": "Button.",
-        "render": false
-      },
-      {
-        "name": "Buttonhole_Collar",
-        "render": false
-        
-      },
-      {
-        "name": "Buttonhole.Body.*",
-        "render": false
-    },
-    {
-      "name": "button_yarn",
-      "render": false   
-  },
-  {
-    "name": "Buttoncollar",
-    "render": false
-  },
-  {
-    "name": "button_yarncollar",
-    "render": false 
-  }
+      "name": "Hidden Placket Variant",
+      "suffix": "placket-hidden",
+      "meshes": [        
+        {
+          "name": "Body SS",
+          "shadow_catcher": true
+        },
+        {
+          "name": "Placket",
+          "render": true
+        }     
       ]
     }
   ]

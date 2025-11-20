@@ -7,7 +7,7 @@ import json
 import signal
 import sys
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 try:
     from textual.app import App, ComposeResult
@@ -49,6 +49,222 @@ from path_utils import (
 from blender_tui_bridge import BlenderTUISession
 import sys
 
+# Modal Screen Classes must be defined before use
+if TEXTUAL_AVAILABLE:
+    # Base single-error modal (robust even on older Textual versions)
+    try:
+        from textual.screen import ModalScreen
+        from textual.widgets import Button, Label
+        from textual.containers import Grid
+
+        class JsonErrorModal(ModalScreen):
+            """Modal screen to show JSON parsing errors with an OK button."""
+            BINDINGS = []
+
+            def __init__(self, file_path: str, error: str):
+                super().__init__()
+                self.file_path = file_path
+                self.error = error
+
+            def compose(self):
+                yield Grid(
+                    Label("❌ JSON Parsing Error", id="json_error_title"),
+                    Label(f"File: {self.file_path}", id="json_error_path"),
+                    Label(f"Error: {self.error}", id="json_error_message"),
+                    Button("OK", variant="error", id="json_error_ok"),
+                    id="json_dialog",
+                )
+
+            def on_button_pressed(self, event: Button.Pressed) -> None:
+                try:
+                    self.app.pop_screen()
+                except Exception:
+                    pass
+    except Exception:
+        JsonErrorModal = None  # type: ignore
+
+    # Consolidated errors modal (optional; requires newer Textual widgets)
+    try:
+        from textual.widgets import Static
+        from textual.containers import Horizontal, Vertical
+
+        class JsonErrorsModal(ModalScreen):
+            """Consolidated modal listing all JSON errors with details and Retry."""
+            BINDINGS = []
+
+            def __init__(self, errors: Dict[str, Dict[str, Any]]):
+                super().__init__()
+                self.errors: Dict[str, Dict[str, Any]] = errors
+                self._selected: Optional[str] = next(iter(errors.keys()), None)
+                self._list_mode: str = "auto"  # optionlist|buttons
+                self._button_map: Dict[str, str] = {}
+                self._label_to_path: Dict[str, str] = {}
+
+            def compose(self):
+                # Left: files list, Right: error details
+                left_widget = None
+                try:
+                    # Prefer OptionList when available
+                    from textual.widgets import OptionList  # type: ignore
+                    files_list = OptionList(id="json_error_files")
+                    for path in sorted(self.errors.keys(), key=lambda p: Path(p).name.lower()):
+                        try:
+                            label = Path(path).name
+                        except Exception:
+                            label = path
+                        self._label_to_path[label] = path
+                        try:
+                            files_list.add_option(label)
+                        except Exception:
+                            pass
+                    left_widget = files_list
+                    self._list_mode = "optionlist"
+                except Exception:
+                    # Fallback: vertical list of buttons (no checkboxes)
+                    from textual.widgets import Button as _Btn
+                    buttons = []
+                    self._button_map.clear()
+                    for idx, path in enumerate(sorted(self.errors.keys(), key=lambda p: Path(p).name.lower())):
+                        try:
+                            label = Path(path).name
+                        except Exception:
+                            label = path
+                        btn_id = f"json_file_btn_{idx}"
+                        self._button_map[btn_id] = path
+                        buttons.append(_Btn(label, id=btn_id))
+                    left_widget = Vertical(*buttons, id="json_error_files_panel")
+                    self._list_mode = "buttons"
+
+                detail_title = Label("JSON Error Details", id="json_errors_detail_title")
+                detail_path = Label("", id="json_errors_detail_path")
+                detail_message = Label("", id="json_errors_detail_message")
+                detail_snippet = Static("", id="json_errors_detail_snippet")
+
+                # Buttons
+                retry_btn = Button("Retry", id="json_errors_retry", variant="primary")
+                close_btn = Button("Close", id="json_errors_close", variant="error")
+
+                # Layout grid
+                yield Grid(
+                    Label("❌ JSON Parsing Errors Found", id="json_errors_title"),
+                    Horizontal(
+                        left_widget,
+                        Grid(
+                            detail_title,
+                            detail_path,
+                            detail_message,
+                            detail_snippet,
+                            id="json_errors_detail_grid",
+                        ),
+                        id="json_errors_split",
+                    ),
+                    Grid(retry_btn, close_btn, id="json_errors_buttons"),
+                    id="json_errors_dialog",
+                )
+
+            def on_mount(self) -> None:
+                self._update_details()
+                # Highlight & select the initial file
+                try:
+                    if self._list_mode == "optionlist":
+                        from textual.widgets import OptionList as _OL  # type: ignore
+                        files_list = self.query_one("#json_error_files", _OL)
+                        try:
+                            files_list.index = 0  # highlight first
+                        except Exception:
+                            pass
+                        try:
+                            files_list.action_select_cursor()
+                        except Exception:
+                            pass
+                    elif self._list_mode == "buttons":
+                        # Focus first button and set selected
+                        panel = self.query_one("#json_error_files_panel", Vertical)
+                        btns = list(panel.query("Button"))
+                        if btns:
+                            try:
+                                btns[0].focus()
+                            except Exception:
+                                pass
+                            try:
+                                self._selected = self._button_map.get(btns[0].id, self._selected)
+                                self._update_details()
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+            def _update_details(self) -> None:
+                try:
+                    detail_path = self.query_one("#json_errors_detail_path", Label)
+                    detail_message = self.query_one("#json_errors_detail_message", Label)
+                    detail_snippet = self.query_one("#json_errors_detail_snippet", Static)
+                except Exception:
+                    return
+                if not self._selected or self._selected not in self.errors:
+                    detail_path.update("")
+                    detail_message.update("Select a file on the left to view details.")
+                    try:
+                        detail_snippet.update("")
+                    except Exception:
+                        pass
+                    return
+                info = self.errors[self._selected]
+                line = info.get("line")
+                col = info.get("column")
+                loc = f" (line {line}, col {col})" if line and col else ""
+                detail_path.update(f"File: {self._selected}")
+                detail_message.update(f"Error: {info.get('message', 'Unknown error')}{loc}")
+                snippet = info.get("snippet", "")
+                try:
+                    detail_snippet.update(snippet)
+                except Exception:
+                    pass
+
+            def on_option_list_option_selected(self, event):
+                try:
+                    from textual.widgets import OptionList as _OL
+                except Exception:
+                    _OL = None
+                if _OL and hasattr(event, 'option_list') and event.option_list.id == "json_error_files":
+                    try:
+                        label = str(getattr(event.option, 'prompt', ''))
+                        path = self._label_to_path.get(label)
+                        if path:
+                            self._selected = path
+                            self._update_details()
+                    except Exception:
+                        pass
+
+            def on_button_pressed(self, event: Button.Pressed) -> None:
+                if self._list_mode != "buttons":
+                    return
+                btn_id = getattr(event.button, 'id', '') or ''
+                if btn_id.startswith("json_file_btn_"):
+                    path = self._button_map.get(btn_id)
+                    if path:
+                        self._selected = path
+                        self._update_details()
+
+            def on_button_pressed(self, event: Button.Pressed) -> None:
+                if event.button.id == "json_errors_close":
+                    try:
+                        self.app.pop_screen()
+                    except Exception:
+                        pass
+                elif event.button.id == "json_errors_retry":
+                    # Ask app to rescan and update this modal
+                    try:
+                        if hasattr(self.app, "_rescan_json_errors_and_update_modal"):
+                            self.app._rescan_json_errors_and_update_modal(self)
+                    except Exception:
+                        pass
+    except Exception:
+        JsonErrorsModal = None  # type: ignore
+else:
+    JsonErrorModal = None  # type: ignore
+    JsonErrorsModal = None  # type: ignore
+
 class BlenderTUIApp(App):
     """
     Textual TUI that communicates with Blender via bridge
@@ -78,8 +294,8 @@ class BlenderTUIApp(App):
     
     .controls_row {
         height: 4;
-        margin: 0 0 1 0;
-        padding: 1;
+        margin: 0 0 0 0;
+        padding: 0;
         border-top: solid white;
     }
     
@@ -111,8 +327,18 @@ class BlenderTUIApp(App):
     }
 
     #mode_list {
-        height: 5;
+        height: 4;
         overflow-y: auto;
+        border: solid $primary;
+    }
+    #fabric_list {
+        border: solid $primary;
+    }
+    #garment_list {
+        border: solid $primary;
+    }
+    #asset_list {
+        border: solid $primary;
     }
     
     Button {
@@ -129,6 +355,123 @@ class BlenderTUIApp(App):
     
     Checkbox {
         margin: 0 0 1 0;
+    }
+
+    /* Modal styling for JSON error */
+    JsonErrorModal {
+        align: center middle;
+    }
+
+    #json_dialog {
+        grid-size: 2;
+        grid-gutter: 1 2;
+        grid-rows: 1fr 3 3;
+        padding: 0 1;
+        width: 80;
+        height: 12;
+        border: thick $background 80%;
+        background: $surface;
+    }
+
+    #json_error_title {
+        column-span: 2;
+        height: 1fr;
+        width: 1fr;
+        content-align: center middle;
+    }
+
+    #json_error_path {
+        column-span: 2;
+    }
+
+    #json_error_message {
+        column-span: 2;
+    }
+
+    #json_dialog Button {
+        width: 100%;
+    }
+
+    /* Consolidated JSON errors modal */
+    JsonErrorsModal {
+        align: center middle;
+    }
+
+    #json_errors_dialog {
+        grid-size: 1;
+        grid-rows: auto 1fr auto;
+        padding: 1 2;
+        width: 100;
+        height: 24;
+        border: thick $background 80%;
+        background: $surface;
+    }
+
+    #json_errors_title {
+        height: 3;
+        content-align: center middle;
+    }
+
+    #json_errors_split {
+        height: 1fr;
+        width: 1fr;
+    }
+
+    #json_errors_split OptionList {
+        width: 40%;
+        height: 100%;
+        border: solid $primary;
+        margin-right: 2;
+    }
+
+    #json_error_files_panel {
+        width: 40%;
+        height: 100%;
+        margin-right: 2;
+        border: solid $primary;
+    }
+
+    #json_error_files_panel Button {
+        width: 100%;
+        content-align: left middle;
+    }
+
+    #json_errors_detail_grid {
+        width: 60%;
+        height: 100%;
+        grid-size: 1;
+        grid-rows: auto auto auto 1fr;
+        padding: 1;
+        border: solid $secondary;
+    }
+
+    #json_errors_detail_title {
+        content-align: left middle;
+    }
+
+    #json_errors_detail_path {
+        color: $text 60%;
+    }
+
+    #json_errors_detail_message {
+        color: $warning;
+        overflow: auto;
+    }
+
+    #json_errors_detail_snippet {
+        overflow: auto;
+        height: 1fr;
+        padding: 1 0 0 0;
+        border-top: dashed $secondary 50%;
+        color: $text;
+        text-style: bold;
+    }
+
+    #json_errors_buttons {
+        grid-size: 2;
+        grid-columns: 1fr 1fr;
+        grid-gutter: 2;
+        height: 3;
     }
     """
     
@@ -167,15 +510,192 @@ class BlenderTUIApp(App):
         self.current_render_task: Optional[asyncio.Task] = None
         self.current_log_task: Optional[asyncio.Task] = None
         self.render_pid: Optional[int] = None
+
+        # JSON errors + watcher
+        self._json_errors: Dict[str, Dict[str, Any]] = {}
+        self._json_watch_task: Optional[asyncio.Task] = None
+        self._json_changed_flag: bool = False
+        self._json_last_scan: Dict[str, float] = {}
     
     def _load_json_file(self, file_path: Path) -> Dict[str, Any]:
         """Load a JSON file safely"""
         try:
             with open(file_path, 'r') as f:
                 return json.load(f)
+        except json.JSONDecodeError as e:
+            # Specific JSON parse error: record and show consolidated modal
+            self.write_message(f"❌ JSON parse error in {file_path}: {e}")
+            self._record_json_error(str(file_path))
+            return {}
         except Exception as e:
             self.write_message(f"❌ Error loading {file_path}: {e}")
+            self._record_json_error(str(file_path), generic_message=str(e))
             return {}
+
+    # -----------------------------
+    # JSON Watch / Consolidated Modal
+    # -----------------------------
+    def _json_candidate_dirs(self) -> List[Path]:
+        dirs: List[Path] = []
+        try:
+            if GARMENTS_DIR and GARMENTS_DIR.exists():
+                dirs.append(GARMENTS_DIR)
+        except Exception:
+            pass
+        try:
+            if FABRICS_DIR and FABRICS_DIR.exists():
+                dirs.append(FABRICS_DIR)
+        except Exception:
+            pass
+        try:
+            if RENDER_CONFIG_PATH and RENDER_CONFIG_PATH.exists():
+                dirs.append(RENDER_CONFIG_PATH.parent)
+        except Exception:
+            pass
+        # De-duplicate
+        seen = set()
+        unique_dirs: List[Path] = []
+        for d in dirs:
+            if str(d) not in seen:
+                seen.add(str(d))
+                unique_dirs.append(d)
+        return unique_dirs
+
+    def _json_files_to_check(self) -> List[Path]:
+        files: List[Path] = []
+        for d in self._json_candidate_dirs():
+            try:
+                files.extend(sorted(d.glob("*.json")))
+            except Exception:
+                pass
+        # Ensure render_config explicitly included
+        try:
+            if RENDER_CONFIG_PATH and RENDER_CONFIG_PATH.exists() and RENDER_CONFIG_PATH not in files:
+                files.append(RENDER_CONFIG_PATH)
+        except Exception:
+            pass
+        return files
+
+    def _extract_json_error_info(self, path: Path) -> Optional[Dict[str, Any]]:
+        """Try parsing JSON and return structured error info when failing."""
+        try:
+            with open(path, "r") as f:
+                json.load(f)
+            return None
+        except json.JSONDecodeError as e:
+            info: Dict[str, Any] = {"message": e.msg, "line": e.lineno, "column": e.colno}
+            # Build context snippet
+            try:
+                text = path.read_text()
+                lines = text.splitlines()
+                idx = (e.lineno - 1) if e.lineno else 0
+                start = max(0, idx - 2)
+                end = min(len(lines), idx + 3)
+                snippet_lines: List[str] = []
+                for i in range(start, end):
+                    pointer = ">" if i == idx else " "
+                    snippet_lines.append(f"{pointer} {i+1:4d} | {lines[i]}")
+                    if i == idx and e.colno and e.colno > 0:
+                        caret_indent = " " * (7 + len(str(i+1)) + e.colno)  # rough align caret under character
+                        snippet_lines.append(f"      | {caret_indent}^")
+                info["snippet"] = "\n".join(snippet_lines)
+            except Exception:
+                pass
+            return info
+        except Exception as e:
+            return {"message": str(e)}
+
+    def _scan_all_json_errors(self) -> Dict[str, Dict[str, Any]]:
+        errors: Dict[str, Dict[str, Any]] = {}
+        for p in self._json_files_to_check():
+            info = self._extract_json_error_info(p)
+            if info:
+                errors[str(p)] = info
+        return errors
+
+    def _record_json_error(self, path: str, generic_message: Optional[str] = None) -> None:
+        p = Path(path)
+        info = self._extract_json_error_info(p)
+        if not info:
+            # fallback when not a JSON decode error
+            info = {"message": generic_message or "Unknown error"}
+        self._json_errors[path] = info
+        self._json_changed_flag = True
+        # Show consolidated modal
+        self._show_json_errors_modal()
+
+    def _show_json_errors_modal(self) -> None:
+        if JsonErrorsModal is None:
+            # Fallback: show single error modal when consolidated unavailable
+            if self._json_errors:
+                path, info = next(iter(self._json_errors.items()))
+                msg = info.get("message", "Unknown error") if isinstance(info, dict) else str(info)
+                self._show_json_error_modal(path, msg)
+            return
+
+        def _push_or_update():
+            # If a modal already present, replace it by pushing a new one
+            try:
+                self.push_screen(JsonErrorsModal(dict(self._json_errors)))
+            except Exception as e:
+                self.write_message(f"⚠️ Failed to open consolidated JSON modal: {e}")
+
+        try:
+            self.call_from_thread(_push_or_update)
+        except Exception:
+            _push_or_update()
+
+    def _rescan_json_errors_and_update_modal(self, modal: Optional["JsonErrorsModal"]) -> None:
+        # Run an async rescan with a short delay to avoid reading during writes
+        async def _rescan_and_update():
+            try:
+                await asyncio.sleep(0.25)
+                fresh = self._scan_all_json_errors()
+                self._json_errors = fresh
+            except Exception as e:
+                self.write_message(f"⚠️ JSON rescan failed: {e}")
+                return
+
+            try:
+                if not self._json_errors:
+                    try:
+                        self.pop_screen()
+                    except Exception:
+                        pass
+                    try:
+                        await self.refresh_all_lists()
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        self.pop_screen()
+                    except Exception:
+                        pass
+                    if JsonErrorsModal is not None:
+                        self.push_screen(JsonErrorsModal(dict(self._json_errors)))
+            except Exception as e:
+                self.write_message(f"⚠️ Modal update failed: {e}")
+
+        try:
+            asyncio.create_task(_rescan_and_update())
+        except Exception:
+            # Fallback synchronous path
+            try:
+                self._json_errors = self._scan_all_json_errors()
+            except Exception:
+                return
+            if not self._json_errors:
+                try:
+                    self.pop_screen()
+                except Exception:
+                    pass
+                try:
+                    asyncio.create_task(self.refresh_all_lists())
+                except Exception:
+                    pass
+            else:
+                if JsonErrorsModal is not None:
+                    self.push_screen(JsonErrorsModal(dict(self._json_errors)))
     
     def _get_local_garments(self) -> List[str]:
         """Get list of available garment files"""
@@ -250,25 +770,46 @@ class BlenderTUIApp(App):
             with Horizontal():
                 # Left column: Mode & Fabric
                 with Vertical(classes="left_column"):
-                    yield Static("� Mode", id="mode_title")
                     self.mode_list = SelectionList(id="mode_list")
                     yield self.mode_list
-                    
-                    yield Static("🧵 Fabric", id="fabric_title")
                     self.fabric_list = SelectionList(id="fabric_list")
                     yield self.fabric_list
+                    # Set border titles programmatically (Textual doesn't support border-title in CSS)
+                    for widget, title in [
+                        (self.mode_list, "Mode"),
+                        (self.fabric_list, "Fabric")
+                    ]:
+                        try:
+                            widget.border_title = title  # Newer API
+                        except Exception:
+                            try:
+                                widget.styles.border_title = title  # Fallback API
+                            except Exception:
+                                pass
                 
                 # Middle column: Garments
                 with Vertical(classes="middle_column"):
-                    yield Static("👔 Garment", id="garment_title")  
                     self.garment_list = SelectionList(id="garment_list")
                     yield self.garment_list
+                    try:
+                        self.garment_list.border_title = "Garment"
+                    except Exception:
+                        try:
+                            self.garment_list.styles.border_title = "Garment"
+                        except Exception:
+                            pass
                 
                 # Right column: Assets
                 with Vertical(classes="right_column"):
-                    yield Static("🎯 Asset", id="asset_title")
                     self.asset_list = SelectionList(id="asset_list")
                     yield self.asset_list
+                    try:
+                        self.asset_list.border_title = "Asset"
+                    except Exception:
+                        try:
+                            self.asset_list.styles.border_title = "Asset"
+                        except Exception:
+                            pass
             
             # Bottom section: Timeout config and render controls
             with Horizontal(classes="controls_row"):
@@ -278,7 +819,7 @@ class BlenderTUIApp(App):
                     self.timeout_input = Input(value="600", placeholder="Timeout (s)", id="timeout_input")
                     yield self.timeout_input
                 
-                self.render_button = Button("🎬 RENDER", id="render_btn", variant="success")
+                self.render_button = Button("🎬 RENDER", id="render_btn", variant="success", flat=True)
                 yield self.render_button
                 self.cancel_button = Button("❌ CANCEL", id="cancel_btn", variant="error")
                 self.cancel_button.display = False  # Hidden by default
@@ -295,6 +836,14 @@ class BlenderTUIApp(App):
     async def on_mount(self):
         """Initialize the session when app starts"""
         self.write_message("🚀 Initializing Blender TUI...")
+        # Log Textual version and consolidated modal support for diagnostics
+        try:
+            import textual  # type: ignore
+            ver = getattr(textual, "__version__", "unknown")
+            consolidated = "enabled" if (TEXTUAL_AVAILABLE and 'JsonErrorsModal' in globals() and JsonErrorsModal is not None) else "disabled"
+            self.write_message(f"🔧 DEBUG: Textual v{ver}; consolidated JSON modal {consolidated}")
+        except Exception:
+            pass
         
         # Always load local file data (garments, fabrics) regardless of bridge status
         await self.refresh_all_lists()
@@ -315,6 +864,21 @@ class BlenderTUIApp(App):
             self.write_message(f"⚠️  Blender bridge unavailable: {e}")
             self.write_message("📁 Running in file-only mode (no rendering)")
         
+        # Start background JSON watcher (polling with debounce)
+        try:
+            self._json_watch_task = asyncio.create_task(self._json_watch_loop())
+        except Exception as e:
+            self.write_message(f"⚠️ Failed to start JSON watcher: {e}")
+
+        # Initial proactive scan; show consolidated modal if any errors
+        try:
+            self._json_errors = self._scan_all_json_errors()
+            if self._json_errors:
+                self.write_message(f"❌ Found JSON issues in {len(self._json_errors)} files; opening modal.")
+                self._show_json_errors_modal()
+        except Exception as e:
+            self.write_message(f"⚠️ Initial JSON scan failed: {e}")
+
         self.write_message("✅ TUI ready - click on items to select them")
     
     def write_message(self, message: str):
@@ -325,6 +889,83 @@ class BlenderTUIApp(App):
         if hasattr(self, 'log') and hasattr(self.log, 'info'):
             self.log.info(message)
         print(message)  # Also print to console for debugging
+
+    # -------------------------------------------------
+    # JSON Error Modal Handling
+    # -------------------------------------------------
+    def _show_json_error_modal(self, path: str, error: str):
+        """Display a modal screen with JSON parsing error details."""
+        try:
+            if JsonErrorModal is None:
+                raise RuntimeError("JsonErrorModal unavailable")
+
+            def _push():
+                try:
+                    self.push_screen(JsonErrorModal(path, error))
+                except Exception as _inner:
+                    self.write_message(f"⚠️ Failed to push modal: {_inner}")
+
+            # Use Textual's thread-safe scheduler if available
+            try:
+                self.call_from_thread(_push)
+            except Exception:
+                # If we're on the UI thread, push directly
+                _push()
+        except Exception as e:
+            # Fallback: ensure at least logged
+            self.write_message(f"⚠️ Failed to show error modal: {e}")
+
+    async def _json_watch_loop(self):
+        """Poll JSON files for changes and rescan with debounce."""
+        debounce_window = 0.5  # seconds
+        scan_interval = 1.0    # seconds
+        pending_since: Optional[float] = None
+
+        while True:
+            try:
+                await asyncio.sleep(scan_interval)
+                changed = False
+                for p in self._json_files_to_check():
+                    try:
+                        mtime = p.stat().st_mtime
+                    except Exception:
+                        mtime = 0.0
+                    prev = self._json_last_scan.get(str(p))
+                    if prev is None or mtime > prev:
+                        changed = True
+                        self._json_last_scan[str(p)] = mtime
+
+                if changed:
+                    now = asyncio.get_event_loop().time()
+                    if pending_since is None:
+                        pending_since = now
+                    # If stable for debounce_window, perform scan
+                    if now - pending_since >= debounce_window:
+                        pending_since = None
+                        new_errors = self._scan_all_json_errors()
+                        # Only update and show modal if changed
+                        if new_errors != self._json_errors:
+                            self._json_errors = new_errors
+                            if self._json_errors:
+                                self.write_message(f"❌ JSON issues detected: {len(self._json_errors)} files")
+                                self._show_json_errors_modal()
+                            else:
+                                self.write_message("✅ JSON issues resolved")
+                                try:
+                                    # Close any existing modal by pushing close
+                                    self.call_from_thread(lambda: self.pop_screen())
+                                except Exception:
+                                    pass
+                                # Refresh lists when things parse OK
+                                try:
+                                    await self.refresh_all_lists()
+                                except Exception:
+                                    pass
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.write_message(f"⚠️ JSON watch loop error: {e}")
+                # continue loop
     
     async def refresh_all_lists(self):
         """Refresh all selection lists"""
