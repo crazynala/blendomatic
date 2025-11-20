@@ -3,6 +3,7 @@ from textual.screen import Screen
 from textual.containers import Vertical, Horizontal
 from textual.widgets import Static, DataTable, ProgressBar, Button
 from textual import events
+from typing import Optional, List
 
 from render_state import RenderRunState, compute_global_progress, AssetStatus
 
@@ -59,12 +60,12 @@ class ExecutionScreen(Screen):
     }
     """
 
-    def __init__(self, state: RenderRunState, name: str | None = None) -> None:
+    def __init__(self, state: RenderRunState, name: Optional[str] = None) -> None:
         super().__init__(name=name)
         self.state = state
-        self.progress_bar: ProgressBar | None = None
-        self.summary_label: Static | None = None
-        self.table: DataTable | None = None
+        self.progress_bar: Optional[ProgressBar] = None
+        self.summary_label: Optional[Static] = None
+        self.table: Optional[DataTable] = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="exec_container"):
@@ -119,7 +120,7 @@ class ExecutionScreen(Screen):
         current_keys = set(table.rows.keys())
         col_keys = list(table.columns.keys())
         
-        assets: list[AssetStatus] = list(self.state.assets.values())
+        assets: List[AssetStatus] = list(self.state.assets.values())
         assets.sort(key=lambda a: a.name)
         
         for asset in assets:
@@ -161,7 +162,7 @@ class ExecutionScreen(Screen):
         self.progress_bar.update(progress=percent)
 
         # Format elapsed + ETA
-        def fmt(sec: float | None) -> str:
+        def fmt(sec: Optional[float]) -> str:
             if sec is None:
                 return "--:--"
             m, s = divmod(int(sec), 60)
