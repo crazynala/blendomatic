@@ -78,6 +78,25 @@ FABRICS_DIR: Path
 RENDERS_DIR: Path
 DEBUG_DIR: Path
 
+def _simple_load_dotenv(dotenv_path: Path):
+    """Lightweight .env loader (key=value) used if python-dotenv isn't invoked earlier."""
+    if not dotenv_path.exists():
+        return
+    try:
+        for line in dotenv_path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if '=' not in line:
+                continue
+            key, val = line.split('=', 1)
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
+    except Exception:
+        pass
+
 def refresh_roots():
     """(Re)compute root directories after environment changes.
 
@@ -93,6 +112,9 @@ def refresh_roots():
     RENDERS_DIR = CODE_ROOT / "renders"
     DEBUG_DIR = CODE_ROOT / "debug"
 
-# Initialize once at import; can be refreshed later
+# Attempt lightweight .env load BEFORE initial root computation
+_simple_load_dotenv(Path(__file__).resolve().parent / '.env')
+
+# Initialize once at import; can be refreshed later (after external dotenv load)
 refresh_roots()
 

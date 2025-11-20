@@ -116,6 +116,14 @@ else:
 
 try:
     print("[BRIDGE_SCRIPT] 🚀 Bridge script starting execution", flush=True)
+    print(f"[BRIDGE_SCRIPT][ENV] BLENDOMATIC_ROOT={os.environ.get('BLENDOMATIC_ROOT')}", flush=True)
+    print(f"[BRIDGE_SCRIPT][ENV] BLENDER_PROJECT_ROOT={os.environ.get('BLENDER_PROJECT_ROOT')}", flush=True)
+    try:
+        import path_utils as _pu
+        print(f"[BRIDGE_SCRIPT][PATHS] CODE_ROOT={_pu.CODE_ROOT}", flush=True)
+        print(f"[BRIDGE_SCRIPT][PATHS] ASSETS_ROOT={_pu.ASSETS_ROOT}", flush=True)
+    except Exception as _e_paths:
+        print(f"[BRIDGE_SCRIPT][PATHS] path_utils import failed: {_e_paths}", flush=True)
     import sys
     sys.stdout.flush()
     
@@ -347,6 +355,8 @@ except Exception as e:
                 f.write(f"[BRIDGE] Starting command: {command}\n")
                 f.write(f"[BRIDGE] Args: {args}\n")
                 f.write(f"[BRIDGE] Command: {' '.join(cmd)}\n")
+                f.write(f"[ENV] BLENDOMATIC_ROOT={self.env.get('BLENDOMATIC_ROOT')}\n")
+                f.write(f"[ENV] BLENDER_PROJECT_ROOT={self.env.get('BLENDER_PROJECT_ROOT')}\n")
                 f.write("-" * 50 + "\n")
             
             # Run Blender with output streaming to log file
@@ -440,6 +450,8 @@ except Exception as e:
             f.write(f"[BRIDGE] Starting detached command: {command}\n")
             f.write(f"[BRIDGE] Args: {args}\n")
             f.write(f"[BRIDGE] Command: {' '.join(render_cmd)}\n")
+            f.write(f"[ENV] BLENDOMATIC_ROOT={self.env.get('BLENDOMATIC_ROOT')}\n")
+            f.write(f"[ENV] BLENDER_PROJECT_ROOT={self.env.get('BLENDER_PROJECT_ROOT')}\n")
             f.write("-" * 50 + "\n")
         
         # Start subprocess in detached mode
@@ -487,19 +499,43 @@ except Exception as e:
                 configs = args.get('configs') or []
                 if configs:
                     garment_file = configs[0].get('garment')
-            if not garment_file:
-                return None
-            if _GARMENTS_DIR is None:
+            if not garment_file or _GARMENTS_DIR is None:
                 return None
             garment_json = _GARMENTS_DIR / garment_file
             if not garment_json.exists():
+                print(f"[BLEND_FILE] Garment JSON missing: {garment_json}")
                 return None
             with open(garment_json, 'r') as f:
                 data = _json_helper.load(f)
             blend_rel = data.get('blend_file')
-            blend_path = _resolve_project_path(blend_rel)
-            return Path(blend_path) if blend_path else None
-        except Exception:
+            if not blend_rel:
+                print(f"[BLEND_FILE] No 'blend_file' key in {garment_json}")
+                return None
+            import path_utils as _pu
+            assets_root = _pu.ASSETS_ROOT
+            rel_path = Path(blend_rel)
+            candidates = []
+            if rel_path.is_absolute():
+                candidates.append(rel_path)
+            else:
+                candidates.extend([
+                    assets_root / rel_path,
+                    assets_root / 'blends' / rel_path,
+                    garment_json.parent / rel_path
+                ])
+            for c in candidates:
+                try:
+                    if c.exists():
+                        print(f"[BLEND_FILE] Using blend file: {c}")
+                        return c
+                    else:
+                        print(f"[BLEND_FILE] Candidate not found: {c}")
+                except Exception:
+                    pass
+            print(f"[BLEND_FILE] No candidate blend file found for '{blend_rel}'")
+            return None
+        except Exception as e:
+            print(f"[BLEND_FILE] Exception resolving blend file: {e}")
             return None
     
     def cancel_render(self) -> Dict:
