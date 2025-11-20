@@ -106,6 +106,13 @@ class BlenderTUIApp(App):
         height: 12;
         border: solid gray;
         margin: 0 0 1 0;
+        overflow-y: auto;
+        scrollbar-color: $secondary $background;
+    }
+
+    #mode_list {
+        height: 4;
+        overflow-y: auto;
     }
     
     Button {
@@ -235,7 +242,7 @@ class BlenderTUIApp(App):
         
         return configs
     
-    def compose(self) -> ComposeResult:
+    def compose(self):
         yield Header(show_clock=True)
         
         with Container():
