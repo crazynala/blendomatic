@@ -488,6 +488,7 @@ class BlenderTUIApp(App):
         self.asset_list: Optional[SelectionList] = None
         self.timeout_checkbox: Optional[Checkbox] = None
         self.timeout_input: Optional[Input] = None
+        self.save_debug_checkbox: Optional[Checkbox] = None
         self.render_button: Optional[Button] = None
         self.cancel_button: Optional[Button] = None
         
@@ -504,6 +505,8 @@ class BlenderTUIApp(App):
         # Timeout configuration
         self.timeout_enabled: bool = True
         self.timeout_seconds: int = 600  # Default 10 minutes
+        # Debug files configuration
+        self.save_debug_files: bool = True
         
         # Rendering state
         self.is_rendering: bool = False
@@ -751,7 +754,8 @@ class BlenderTUIApp(App):
                     'mode': self.selected_mode,
                     'garment': self.selected_garment,
                     'fabric': fabric,
-                    'asset': asset
+                    'asset': asset,
+                    'save_debug_files': self.save_debug_files
                 }
                 
                 # Add timeout configuration if enabled
@@ -818,6 +822,9 @@ class BlenderTUIApp(App):
                     yield self.timeout_checkbox
                     self.timeout_input = Input(value="600", placeholder="Timeout (s)", id="timeout_input")
                     yield self.timeout_input
+                # Save debug files toggle near render button
+                self.save_debug_checkbox = Checkbox("Save debug files", value=True, id="save_debug_checkbox")
+                yield self.save_debug_checkbox
                 
                 self.render_button = Button("🎬 RENDER", id="render_btn", variant="success", flat=True)
                 yield self.render_button
@@ -1130,6 +1137,9 @@ class BlenderTUIApp(App):
             if hasattr(self, 'timeout_input'):
                 self.timeout_input.disabled = not self.timeout_enabled
             await self.update_local_status()
+        elif event.checkbox is self.save_debug_checkbox:
+            self.save_debug_files = event.value
+            await self.update_local_status()
     
     async def on_input_changed(self, event):
         """Handle timeout input changes"""
@@ -1145,6 +1155,7 @@ class BlenderTUIApp(App):
     async def update_local_status(self):
         """Update message log with current configuration status"""
         timeout_status = f"{self.timeout_seconds}s" if self.timeout_enabled else "Disabled"
+        debug_status = "On" if self.save_debug_files else "Off"
         
         ready = all([self.selected_mode, self.selected_garment, self.selected_fabrics, self.selected_assets])
         status = 'Ready to render' if ready else 'Configuration incomplete'
@@ -1154,7 +1165,7 @@ class BlenderTUIApp(App):
         combinations = len(self.selected_fabrics) * len(self.selected_assets) if self.selected_fabrics and self.selected_assets else 0
         combo_status = f" | 🎯 Will render {combinations} combinations" if combinations > 1 else ""
         
-        self.write_message(f"🔧 Mode: {self.selected_mode or 'Not selected'} | 👔 Garment: {self.selected_garment or 'Not selected'} | 🧵 Fabrics: {fabric_status} | 🎨 Assets: {asset_status}{combo_status} | ⏱️ Timeout: {timeout_status} | Status: {status}")
+        self.write_message(f"🔧 Mode: {self.selected_mode or 'Not selected'} | 👔 Garment: {self.selected_garment or 'Not selected'} | 🧵 Fabrics: {fabric_status} | 🎨 Assets: {asset_status}{combo_status} | ⏱️ Timeout: {timeout_status} | 🐞 Debug: {debug_status} | Status: {status}")
     
     async def tail_log_file(self, log_file_path: str):
         """Tail the Blender log file and stream output to TUI"""

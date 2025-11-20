@@ -45,6 +45,7 @@ class RenderSession:
         # Status tracking
         self._garment_loaded = False
         self._fabric_applied = False
+        self.save_debug_files: bool = True
     
     # ---------------------------------------------------------
     # Utility Methods
@@ -117,6 +118,11 @@ class RenderSession:
     # ---------------------------------------------------------
     # Configuration Methods
     # ---------------------------------------------------------
+    def set_save_debug_files(self, enabled: bool) -> None:
+        try:
+            self.save_debug_files = bool(enabled)
+        except Exception:
+            self.save_debug_files = True
     
     def set_mode(self, mode_name: str) -> None:
         """Set render mode and apply settings"""
@@ -281,16 +287,24 @@ class RenderSession:
             
             raise RuntimeError(f"Missing components: {', '.join(missing)}")
         
-        # Generate output path
+        # Generate output path renders/[mode]/[date]/[garment]
         garment_name = self.garment.get("output_prefix", "garment")
         fabric_name = self.fabric["name"].lower().replace(" ", "_")
         asset_suffix = self.asset.get("suffix", self.asset["name"].lower().replace(" ", "_"))
-        
-        outdir = RENDERS_DIR / garment_name
+
+        import datetime as _dt
+        date_folder = _dt.datetime.now().strftime("%Y-%m-%d")
+
+        # Ensure mode is set; fallback to 'default' if missing
+        mode_name = self.mode or "default"
+
+        outdir = RENDERS_DIR / mode_name / date_folder / garment_name
         outdir.mkdir(parents=True, exist_ok=True)
-        
+
         filename = f"{garment_name}-{fabric_name}-{asset_suffix}.png"
         outpath = str(outdir / filename)
+        print(f"[RENDER] Output directory: {outdir}")
+        print(f"[RENDER] Output file: {filename}")
         
         # Render
         bpy.context.scene.render.filepath = outpath
@@ -302,11 +316,12 @@ class RenderSession:
             
             print(f"[RENDER] Starting render: {filename}")
             
-            # Save debug scene before rendering
-            DEBUG_DIR.mkdir(exist_ok=True)
-            debug_path = DEBUG_DIR / f"debug_scene_{fabric_name}_{asset_suffix}.blend"
-            bpy.ops.wm.save_mainfile(filepath=str(debug_path))
-            print(f"[DEBUG] Saved debug scene to {debug_path}")
+            # Optionally save debug scene before rendering
+            if self.save_debug_files:
+                DEBUG_DIR.mkdir(exist_ok=True)
+                debug_path = DEBUG_DIR / f"debug_scene_{fabric_name}_{asset_suffix}.blend"
+                bpy.ops.wm.save_mainfile(filepath=str(debug_path))
+                print(f"[DEBUG] Saved debug scene to {debug_path}")
             
             bpy.ops.render.render(write_still=True)
             print(f"[RENDER] Completed: {outpath}")

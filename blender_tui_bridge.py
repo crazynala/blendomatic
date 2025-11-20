@@ -202,7 +202,11 @@ try:
             session.set_mode(config_data['mode'])
             print(f"[RENDER_CONFIG] ✅ Mode '{config_data['mode']}' applied AFTER scene load", flush=True)
             
-            print("[RENDER_CONFIG] 🎬 Starting render process...", flush=True)
+            try:
+                session.set_save_debug_files(config_data.get('save_debug_files', True))
+            except Exception:
+                pass
+            print(f"[RENDER_CONFIG] 🎬 Starting render process...", flush=True)
             output_path = session.render()
             print(f"[RENDER_CONFIG] 🎉 Render completed successfully: {output_path}", flush=True)
             result['result'] = output_path
@@ -254,6 +258,12 @@ try:
                         log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] Setting mode: {config_data['mode']}")
                         session.set_mode(config_data['mode'])
                     
+                    # Set debug save preference for this job
+                    try:
+                        session.set_save_debug_files(config_data.get('save_debug_files', True))
+                    except Exception:
+                        pass
+
                     # Render
                     log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] Rendering...")
                     output_path = session.render()
