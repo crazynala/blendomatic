@@ -70,12 +70,29 @@ def resolve_project_path(path_like: Union[str, Path, None]) -> Optional[Path]:
 
 
 # Common locations in this repo (code), resolved against code root
-CODE_ROOT = get_code_root()
-ASSETS_ROOT = get_assets_root()
+CODE_ROOT: Path
+ASSETS_ROOT: Path
+RENDER_CONFIG_PATH: Path
+GARMENTS_DIR: Path
+FABRICS_DIR: Path
+RENDERS_DIR: Path
+DEBUG_DIR: Path
 
-# Project-owned JSONs live in the repo; keep these anchored to CODE_ROOT
-RENDER_CONFIG_PATH = CODE_ROOT / "render_config.json"
-GARMENTS_DIR = CODE_ROOT / "garments"
-FABRICS_DIR = CODE_ROOT / "fabrics"
-RENDERS_DIR = CODE_ROOT / "renders"
-DEBUG_DIR = CODE_ROOT / "debug"
+def refresh_roots():
+    """(Re)compute root directories after environment changes.
+
+    Call this after loading .env so BLENDER_PROJECT_ROOT is respected.
+    """
+    global CODE_ROOT, ASSETS_ROOT
+    global RENDER_CONFIG_PATH, GARMENTS_DIR, FABRICS_DIR, RENDERS_DIR, DEBUG_DIR
+    CODE_ROOT = get_code_root()
+    ASSETS_ROOT = get_assets_root()
+    RENDER_CONFIG_PATH = CODE_ROOT / "render_config.json"
+    GARMENTS_DIR = CODE_ROOT / "garments"
+    FABRICS_DIR = CODE_ROOT / "fabrics"
+    RENDERS_DIR = CODE_ROOT / "renders"
+    DEBUG_DIR = CODE_ROOT / "debug"
+
+# Initialize once at import; can be refreshed later
+refresh_roots()
+

@@ -12,6 +12,8 @@ from textual.screen import Screen
 from textual import on
 import asyncio
 from typing import Optional
+import json, time, threading, queue, traceback
+from pathlib import Path
 
 try:
     from render_session import RenderSession
@@ -23,6 +25,106 @@ except ImportError:
         # Fallback for when running outside Blender
         RenderSession = None
 
+try:
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler
+    USE_WATCHDOG = True
+except ImportError:
+    USE_WATCHDOG = False
+
+WATCH_DIRS = [Path("fabrics"), Path("garments")]
+DEBOUNCE_MS = 300
+
+class _ChangeEvent:
+    def __init__(self, path: Path):
+        self.path = path
+        self.ts = time.time()
+
+class JsonWatcher:
+    def __init__(self, on_reload, on_error):
+        self.on_reload = on_reload
+        self.on_error = on_error
+        self.q = queue.Queue()
+        self.stop_flag = threading.Event()
+        self.last_processed: dict[Path,float] = {}
+        self.thread = threading.Thread(target=self._loop, daemon=True)
+
+    def start(self):
+        for d in WATCH_DIRS:
+            d.mkdir(exist_ok=True)
+        if USE_WATCHDOG:
+            self._start_watchdog()
+        else:
+            self._start_poll()
+        self.thread.start()
+        print("[WATCH] Started JSON watch")
+
+    def stop(self):
+        self.stop_flag.set()
+        print("[WATCH] Stopping JSON watch")
+
+    def _start_watchdog(self):
+        class Handler(FileSystemEventHandler):
+            def on_modified(_, event):
+                if not event.is_directory and event.src_path.endswith(".json"):
+                    self.q.put(_ChangeEvent(Path(event.src_path)))
+            def on_created(_, event):
+                if not event.is_directory and event.src_path.endswith(".json"):
+                    self.q.put(_ChangeEvent(Path(event.src_path)))
+            def on_deleted(_, event):
+                if not event.is_directory and event.src_path.endswith(".json"):
+                    self.q.put(_ChangeEvent(Path(event.src_path)))
+        self.observer = Observer()
+        h = Handler()
+        for d in WATCH_DIRS:
+            self.observer.schedule(h, str(d), recursive=False)
+        self.observer.start()
+
+    def _start_poll(self):
+        self.poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
+        self.poll_thread.start()
+
+    def _poll_loop(self):
+        mtimes: dict[Path,float] = {}
+        while not self.stop_flag.is_set():
+            for d in WATCH_DIRS:
+                for p in d.glob("*.json"):
+                    m = p.stat().st_mtime
+                    if mtimes.get(p) != m:
+                        mtimes[p] = m
+                        self.q.put(_ChangeEvent(p))
+            time.sleep(1.0)
+
+    def _loop(self):
+        pending: dict[Path,_ChangeEvent] = {}
+        while not self.stop_flag.is_set():
+            try:
+                evt = self.q.get(timeout=0.2)
+                pending[evt.path] = evt
+            except queue.Empty:
+                pass
+            now = time.time()
+            to_process = [p for p,e in pending.items() if (now - e.ts)*1000 >= DEBOUNCE_MS]
+            for p in to_process:
+                del pending[p]
+                self._process(p)
+
+    def _process(self, path: Path):
+        if not path.exists():
+            # deletion: trigger reload of listing
+            self.on_reload(None, deleted=path)
+            return
+        try:
+            raw = path.read_text()
+            data = json.loads(raw)
+            self.on_reload(data, file=path)
+        except Exception as e:
+            err = "".join(traceback.format_exception_only(type(e), e)).strip()
+            detail = traceback.format_exc()
+            self.on_error(path, err, detail)
+
+# ---- Integration points in TUI application ----
+# Assume TUI class name App; adjust as needed.
 
 class StatusPanel(Static):
     """Widget showing current render session status"""
@@ -368,6 +470,48 @@ class RenderScreen(Screen):
             
         except Exception as e:
             self.log(f"Error refreshing: {e}")
+    
+    def _init_watcher(self):
+        def on_reload(data, file=None, deleted=None):
+            if file:
+                print(f"[WATCH] Reloaded {file}")
+            if deleted:
+                print(f"[WATCH] Deleted {deleted}")
+            self._refresh_json_cache()
+            self._refresh_lists()
+
+        def on_error(path, err, detail):
+            print(f"[WATCH] Parse error in {path}: {err}")
+            self.show_json_error_modal(path, err, detail)
+
+        self.json_watcher = JsonWatcher(on_reload, on_error)
+        self.json_watcher.start()
+
+    def show_json_error_modal(self, path: Path, err: str, detail: str):
+        # Replace with real modal implementation for your TUI framework
+        print(f"[MODAL][JSON ERROR] {path.name}\n{err}")
+
+    def _refresh_json_cache(self):
+        # Re-scan directories and rebuild internal representation
+        self.fabrics = self._load_dir_json(Path("fabrics"))
+        self.garments = self._load_dir_json(Path("garments"))
+
+    def _load_dir_json(self, d: Path):
+        out = {}
+        for f in d.glob("*.json"):
+            try:
+                out[f.name] = json.loads(f.read_text())
+            except Exception as e:
+                self.show_json_error_modal(f, str(e), "")
+        return out
+
+    def _refresh_lists(self):
+        # Update TUI list widgets from self.fabrics/self.garments
+        pass
+
+    def on_exit(self):
+        if hasattr(self, "json_watcher"):
+            self.json_watcher.stop()
 
 
 class BlendomaticApp(App):

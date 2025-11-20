@@ -15,10 +15,29 @@ from typing import Dict, List, Optional
 import time
 import json as _json_helper
 
-# For resolving paths to garments' blend files before launching Blender
+# Load .env BEFORE importing path_utils so env vars are visible
 try:
-    from path_utils import GARMENTS_DIR as _GARMENTS_DIR, resolve_project_path as _resolve_project_path
-except Exception:
+    from dotenv import load_dotenv as _load_dotenv
+    # Explicit path to ensure correct file even if cwd differs
+    _env_path = Path(__file__).parent / '.env'
+    _load_dotenv(dotenv_path=_env_path, override=False)
+    print(f"[ENV] Loaded .env from {_env_path} (exists={_env_path.exists()})", flush=True)
+    print(f"[ENV] BLENDER_PROJECT_ROOT={os.environ.get('BLENDER_PROJECT_ROOT')}", flush=True)
+except Exception as _e:
+    print(f"[ENV] .env load skipped: {_e}", flush=True)
+
+# For resolving paths & allow refresh after env load
+try:
+    from path_utils import (
+        GARMENTS_DIR as _GARMENTS_DIR,
+        resolve_project_path as _resolve_project_path,
+        refresh_roots as _refresh_roots,
+        ASSETS_ROOT as _ASSETS_ROOT,
+    )
+    _refresh_roots()  # Recompute with any env var now loaded
+    print(f"[ENV] After refresh: ASSETS_ROOT={_ASSETS_ROOT}", flush=True)
+except Exception as _e:
+    print(f"[ENV] path_utils import failed: {_e}", flush=True)
     _GARMENTS_DIR = None
     def _resolve_project_path(p):
         return Path(p) if p else None
@@ -29,12 +48,6 @@ class BlenderBridge:
     """
     
     def __init__(self, blender_executable="blender"):
-        try:
-            from dotenv import load_dotenv
-            load_dotenv()  # reads .env in the cwd/project root
-        except Exception:
-            pass
-
         self.blender_exe = blender_executable
         self.temp_dir = Path(tempfile.mkdtemp(prefix="blendomatic_"))
         self.config_file = self.temp_dir / "config.json"
@@ -56,9 +69,18 @@ class BlenderBridge:
         
         # Prepare environment for Blender subprocess: ensure project root available inside
         self.env = os.environ.copy()
-        # Prefer not to overwrite if already set by user; otherwise set it
-        self.env.setdefault("BLENDOMATIC_ROOT", str(self.project_root))
-        self.env.setdefault("BLENDER_PROJECT_ROOT", str(self.project_root))
+        # Prefer user-provided values from .env; log if defaults used
+        if "BLENDOMATIC_ROOT" not in self.env:
+            self.env["BLENDOMATIC_ROOT"] = str(self.project_root)
+            print(f"[ENV] Defaulted BLENDOMATIC_ROOT -> {self.project_root}", flush=True)
+        else:
+            print(f"[ENV] Using existing BLENDOMATIC_ROOT={self.env['BLENDOMATIC_ROOT']}", flush=True)
+        if "BLENDER_PROJECT_ROOT" not in self.env:
+            # Provide same default but user likely wants assets elsewhere
+            self.env["BLENDER_PROJECT_ROOT"] = self.env["BLENDOMATIC_ROOT"]
+            print(f"[ENV] Defaulted BLENDER_PROJECT_ROOT -> {self.env['BLENDER_PROJECT_ROOT']}", flush=True)
+        else:
+            print(f"[ENV] Using existing BLENDER_PROJECT_ROOT={self.env['BLENDER_PROJECT_ROOT']}", flush=True)
         
         # Store last execution output for debugging
         self.last_stdout = ""
