@@ -77,7 +77,7 @@ class BlenderTUIApp(App):
     }
     
     .controls_row {
-        height: 6;
+        height: 4;
         margin: 0 0 1 0;
         padding: 1;
         border-top: solid white;
@@ -111,7 +111,7 @@ class BlenderTUIApp(App):
     }
 
     #mode_list {
-        height: 4;
+        height: 5;
         overflow-y: auto;
     }
     
