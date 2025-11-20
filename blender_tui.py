@@ -329,7 +329,7 @@ class BlenderTUIApp(App):
     }
 
     #mode_list {
-        height: 4;
+        height: 5;
         overflow-y: auto;
         border: solid $primary;
     }
