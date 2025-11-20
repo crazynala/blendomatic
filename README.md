@@ -104,6 +104,28 @@ The system uses the same JSON configuration files as before:
 - **`garments/*.json`** - Garment definitions with blend files and assets
 - **`fabrics/*.json`** - Fabric materials and textures
 
+### Portable Paths (Recommended)
+
+- Set a per-machine environment variable pointing to your project root:
+
+```zsh
+export BLENDOMATIC_ROOT="/absolute/path/to/blendomatic"
+# or as an alternative name:
+export BLENDER_PROJECT_ROOT="/absolute/path/to/blendomatic"
+```
+
+- In your JSON files, use paths relative to this root, for example:
+
+  - Garment `blend_file`: `"scenes/base_scene.blend"`
+  - Fabric textures: `"textures/hera_white/Hera White V2_albedo.png"`
+
+- The app resolves paths as follows:
+  - Absolute paths are used as-is
+  - Relative paths are resolved against `BLENDOMATIC_ROOT` (or `BLENDER_PROJECT_ROOT` if set),
+    falling back to auto-detected repo root if the env var is not defined.
+
+This makes configs portable across machines without hardcoded absolute paths.
+
 ## 🎯 Usage Examples
 
 ### Shell Workflow

@@ -5,11 +5,11 @@
     "main_fabric": {
       "match_name": "fabric",
       "textures": {
-        "base_color": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Hera White Texture/Hera White V2_albedo.png",
-        "normal": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Hera White Texture/Hera White V2_normal.png",
-        "roughness": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Hera White Texture/Hera White V2_rough.exr"
+        "base_color": "Fabrics/Hera White Texture/Hera White V2_albedo.png",
+        "normal": "Fabrics/Hera White Texture/Hera White V2_normal.png",
+        "roughness": "Fabrics/Hera White Texture/Hera White V2_rough.exr"
       },
-      "material_params": {        
+      "material_params": {
         "ior": 1.45
       },
       "hue_sat_params": {

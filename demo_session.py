@@ -11,9 +11,12 @@ import time
 # ---------------------------------------------------------
 # Paths
 # ---------------------------------------------------------
-RENDER_CONFIG_PATH = "render_config.json"
-GARMENTS_DIR = Path("garments")
-FABRICS_DIR = Path("fabrics")
+from path_utils import (
+    RENDER_CONFIG_PATH,
+    GARMENTS_DIR,
+    FABRICS_DIR,
+    RENDERS_DIR,
+)
 
 
 class MockRenderSession:
@@ -199,7 +202,7 @@ class MockRenderSession:
         asset_suffix = self.asset.get("suffix", self.asset["name"].lower().replace(" ", "_"))
         
         filename = f"{garment_name}-{fabric_name}-{asset_suffix}.png"
-        outpath = f"renders/{garment_name}/{filename}"
+        outpath = str((RENDERS_DIR / garment_name / filename))
         
         print(f"[DEMO] Starting render: {filename}")
         

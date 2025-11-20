@@ -39,10 +39,12 @@ except ImportError:
             return func
         return decorator
 
-# Constants for file paths
-GARMENTS_DIR = Path("garments")
-FABRICS_DIR = Path("fabrics")
-RENDER_CONFIG_PATH = Path("render_config.json")
+# Path handling centralized
+from path_utils import (
+    GARMENTS_DIR,
+    FABRICS_DIR,
+    RENDER_CONFIG_PATH,
+)
 
 from blender_tui_bridge import BlenderTUISession
 import sys
@@ -334,7 +336,7 @@ class BlenderTUIApp(App):
             # Fallback: load modes directly from render config file
             if not modes:
                 try:
-                    with open("render_config.json", 'r') as f:
+                    with open(RENDER_CONFIG_PATH, 'r') as f:
                         config_data = json.load(f)
                         modes = list(config_data.get("modes", {}).keys())
                         self.write_message(f"🔧 DEBUG: Loaded modes from local config: {modes}")
@@ -348,6 +350,12 @@ class BlenderTUIApp(App):
             fabrics = await asyncio.get_event_loop().run_in_executor(
                 None, self._get_local_fabrics
             )
+            # Debug: which directories are being used
+            try:
+                self.write_message(f"🔧 DEBUG: GARMENTS_DIR = {GARMENTS_DIR}")
+                self.write_message(f"🔧 DEBUG: FABRICS_DIR = {FABRICS_DIR}")
+            except Exception:
+                pass
             
             # Get assets for current garment (if any)
             assets = []

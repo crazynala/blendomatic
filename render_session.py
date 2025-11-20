@@ -11,9 +11,14 @@ from typing import List, Dict, Optional, Any
 # ---------------------------------------------------------
 # Paths
 # ---------------------------------------------------------
-RENDER_CONFIG_PATH = "render_config.json"
-GARMENTS_DIR = Path("garments")
-FABRICS_DIR = Path("fabrics")
+from path_utils import (
+    RENDER_CONFIG_PATH,
+    GARMENTS_DIR,
+    FABRICS_DIR,
+    RENDERS_DIR,
+    DEBUG_DIR,
+    resolve_project_path,
+)
 
 
 class RenderSession:
@@ -146,11 +151,28 @@ class RenderSession:
         
         # Load blend file
         blend_file = self.garment.get("blend_file")
-        if not blend_file or not os.path.exists(blend_file):
+        blend_path = resolve_project_path(blend_file)
+        if not blend_path or not os.path.exists(blend_path):
             raise FileNotFoundError(f"Garment blend file not found: {blend_file}")
-        
-        print(f"[INFO] Loading garment blend file: {blend_file}")
-        bpy.ops.wm.open_mainfile(filepath=blend_file)
+
+        # Avoid resetting Blender if the desired file is already open
+        try:
+            current_file = bpy.data.filepath
+            if current_file and os.path.exists(current_file):
+                try:
+                    same = os.path.samefile(current_file, str(blend_path))
+                except Exception:
+                    same = (Path(current_file).resolve() == Path(blend_path).resolve())
+            else:
+                same = False
+        except Exception:
+            same = False
+
+        if same:
+            print(f"[INFO] Garment blend already open: {blend_path}")
+        else:
+            print(f"[INFO] Loading garment blend file: {blend_path}")
+            bpy.ops.wm.open_mainfile(filepath=str(blend_path))
         
         # Reset dependent state
         self.asset = None
@@ -166,7 +188,9 @@ class RenderSession:
             available = ", ".join(self.list_fabrics())
             raise ValueError(f"Unknown fabric '{fabric_name}'. Available: {available}")
         
+        print(f"[FABRIC] Loading fabric JSON: {match}", flush=True)
         self.fabric = self._load_json(match)
+        print(f"[FABRIC] Fabric JSON loaded: {self.fabric.get('name', 'Unknown')}", flush=True)
         
         # Debug: Log the actual loaded fabric config
         print(f"[FABRIC_DEBUG] Current working directory: {os.getcwd()}")
@@ -184,9 +208,22 @@ class RenderSession:
         else:
             print(f"[FABRIC_DEBUG] No main_fabric config found")
         
-        # Update existing materials in the Blender file with fabric textures
-        self.material = self._apply_fabric_material(self.fabric)
-        self.debug_material_assignments()  # Add this line
+        # Optionally skip heavy material application for debugging
+        import os as _os
+        safe_mode = _os.environ.get('BLENDOMATIC_SAFE_MODE') == '1'
+        if safe_mode:
+            print(f"[FABRIC] SAFE MODE active - skipping material application", flush=True)
+            # Pick an existing material as placeholder if available
+            try:
+                self.material = next((m for m in bpy.data.materials if m), None)
+            except Exception:
+                self.material = None
+        else:
+            # Update existing materials in the Blender file with fabric textures
+            print(f"[FABRIC] Applying fabric materials...", flush=True)
+            self.material = self._apply_fabric_material(self.fabric)
+            print(f"[FABRIC] Material application done", flush=True)
+            self.debug_material_assignments()
         self.fabric_applied = True
         
         # The materials are already assigned to objects in the Blender file,
@@ -249,7 +286,7 @@ class RenderSession:
         fabric_name = self.fabric["name"].lower().replace(" ", "_")
         asset_suffix = self.asset.get("suffix", self.asset["name"].lower().replace(" ", "_"))
         
-        outdir = Path("renders") / garment_name
+        outdir = RENDERS_DIR / garment_name
         outdir.mkdir(parents=True, exist_ok=True)
         
         filename = f"{garment_name}-{fabric_name}-{asset_suffix}.png"
@@ -266,9 +303,8 @@ class RenderSession:
             print(f"[RENDER] Starting render: {filename}")
             
             # Save debug scene before rendering
-            debug_dir = Path("debug")
-            debug_dir.mkdir(exist_ok=True)
-            debug_path = debug_dir / f"debug_scene_{fabric_name}_{asset_suffix}.blend"
+            DEBUG_DIR.mkdir(exist_ok=True)
+            debug_path = DEBUG_DIR / f"debug_scene_{fabric_name}_{asset_suffix}.blend"
             bpy.ops.wm.save_mainfile(filepath=str(debug_path))
             print(f"[DEBUG] Saved debug scene to {debug_path}")
             
@@ -388,11 +424,16 @@ class RenderSession:
 
         def load_or_get_image(path: str):
             """Load an image once, reuse if already loaded with same filepath."""
-            if not path or not os.path.exists(path):
+            if not path:
+                print(f"[FABRIC]   ⚠ Empty texture path")
+                return None
+
+            resolved = resolve_project_path(path)
+            if not resolved or not os.path.exists(resolved):
                 print(f"[FABRIC]   ⚠ Texture path does not exist: {path}")
                 return None
 
-            abspath = os.path.abspath(path)
+            abspath = os.path.abspath(str(resolved))
             # Try to find an existing image with same filepath
             for img in bpy.data.images:
                 try:

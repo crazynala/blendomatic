@@ -13,6 +13,15 @@ import signal
 from pathlib import Path
 from typing import Dict, List, Optional
 import time
+import json as _json_helper
+
+# For resolving paths to garments' blend files before launching Blender
+try:
+    from path_utils import GARMENTS_DIR as _GARMENTS_DIR, resolve_project_path as _resolve_project_path
+except Exception:
+    _GARMENTS_DIR = None
+    def _resolve_project_path(p):
+        return Path(p) if p else None
 
 class BlenderBridge:
     """
@@ -20,6 +29,12 @@ class BlenderBridge:
     """
     
     def __init__(self, blender_executable="blender"):
+        try:
+            from dotenv import load_dotenv
+            load_dotenv()  # reads .env in the cwd/project root
+        except Exception:
+            pass
+
         self.blender_exe = blender_executable
         self.temp_dir = Path(tempfile.mkdtemp(prefix="blendomatic_"))
         self.config_file = self.temp_dir / "config.json"
@@ -27,8 +42,8 @@ class BlenderBridge:
         self.script_file = self.temp_dir / "blender_script.py"
         
         # Create logs directory in project root
-        project_root = Path(__file__).parent
-        self.logs_dir = project_root / "logs"
+        self.project_root = Path(__file__).parent.resolve()
+        self.logs_dir = self.project_root / "logs"
         self.logs_dir.mkdir(exist_ok=True)
         
         # Create timestamped log file in logs directory
@@ -38,6 +53,12 @@ class BlenderBridge:
         
         # Generate the Blender script that will be executed
         self._create_blender_script()
+        
+        # Prepare environment for Blender subprocess: ensure project root available inside
+        self.env = os.environ.copy()
+        # Prefer not to overwrite if already set by user; otherwise set it
+        self.env.setdefault("BLENDOMATIC_ROOT", str(self.project_root))
+        self.env.setdefault("BLENDER_PROJECT_ROOT", str(self.project_root))
         
         # Store last execution output for debugging
         self.last_stdout = ""
@@ -62,7 +83,14 @@ from pathlib import Path
 # Add the original project directory to path
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath("__file__")))
+# Prefer environment-provided root
+project_root = os.environ.get("BLENDOMATIC_ROOT") or os.environ.get("BLENDER_PROJECT_ROOT")
+if project_root:
+    sys.path.insert(0, project_root)
+else:
+    # Fallback: embed repo root detected by bridge process
+    PROJECT_ROOT_FALLBACK = r"__PROJECT_ROOT__"
+    sys.path.insert(0, PROJECT_ROOT_FALLBACK)
 
 try:
     print("[BRIDGE_SCRIPT] 🚀 Bridge script starting execution", flush=True)
@@ -240,7 +268,8 @@ except Exception as e:
     with open(result_file, 'w') as f:
         json.dump(result, f)
 '''
-        
+        # Safely inject the project root without invoking f-string formatting
+        script_content = script_content.replace("__PROJECT_ROOT__", str(self.project_root))
         self.script_file.write_text(script_content)
     
     def execute_command(self, command: str, args: Dict = None) -> Dict:
@@ -261,10 +290,15 @@ except Exception as e:
         if self.result_file.exists():
             self.result_file.unlink()
         
+        # Determine if we should open a specific .blend file first
+        blend_file_arg = self._determine_blend_file_for_command(command, args)
+
         # Execute Blender with our script
-        cmd = [
-            self.blender_exe,
-            "--background",
+        cmd = [self.blender_exe,
+               "--background"]
+        if blend_file_arg:
+            cmd.append(str(blend_file_arg))
+        cmd += [
             "--python", str(self.script_file),
             "--", str(self.config_file), str(self.result_file)
         ]
@@ -300,7 +334,8 @@ except Exception as e:
                     stdout=log_f, 
                     stderr=subprocess.STDOUT,  # Combine stderr with stdout
                     text=True, 
-                    timeout=timeout
+                    timeout=timeout,
+                    env=self.env
                 )
             
             print(f"[BRIDGE] Blender exit code: {result.returncode}")
@@ -365,10 +400,15 @@ except Exception as e:
         with open(render_config_file, 'w') as f:
             json.dump(config, f)
         
+        # Determine if we should open a specific .blend file first
+        blend_file_arg = self._determine_blend_file_for_command(command, args)
+
         # Create dedicated command for render
-        render_cmd = [
-            self.blender_exe,
-            "--background", 
+        render_cmd = [self.blender_exe,
+                       "--background"]
+        if blend_file_arg:
+            render_cmd.append(str(blend_file_arg))
+        render_cmd += [
             "--python", str(self.script_file),
             "--", str(render_config_file), str(render_result_file)
         ]
@@ -388,7 +428,8 @@ except Exception as e:
                 stderr=subprocess.STDOUT,
                 text=True,
                 # Detach from parent process
-                start_new_session=True
+                start_new_session=True,
+                env=self.env
             )
         
         # Store process info for potential cancellation
@@ -413,6 +454,31 @@ except Exception as e:
             "pid_file": str(pid_file),
             "detached": True
         }
+
+    def _determine_blend_file_for_command(self, command: str, args: Dict) -> Optional[Path]:
+        """Return a resolved .blend file path to open before running the script, if applicable."""
+        try:
+            garment_file = None
+            if command == 'render_with_config':
+                garment_file = args.get('garment')
+            elif command == 'render_multiple_configs':
+                configs = args.get('configs') or []
+                if configs:
+                    garment_file = configs[0].get('garment')
+            if not garment_file:
+                return None
+            if _GARMENTS_DIR is None:
+                return None
+            garment_json = _GARMENTS_DIR / garment_file
+            if not garment_json.exists():
+                return None
+            with open(garment_json, 'r') as f:
+                data = _json_helper.load(f)
+            blend_rel = data.get('blend_file')
+            blend_path = _resolve_project_path(blend_rel)
+            return Path(blend_path) if blend_path else None
+        except Exception:
+            return None
     
     def cancel_render(self) -> Dict:
         """Cancel the currently running render process"""

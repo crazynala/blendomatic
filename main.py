@@ -7,6 +7,8 @@ import argparse
 from pathlib import Path
 
 def main():
+    from dotenv import load_dotenv
+    load_dotenv()  # reads .env in the cwd/project root
     # Check if running inside Blender
     try:
         import bpy
