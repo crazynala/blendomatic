@@ -696,19 +696,98 @@ class RenderSession:
         print(f"[MESH_CONFIG] ✅ {mesh_config['name']} configured successfully", flush=True)
     
     def _configure_asset(self, asset: Dict) -> None:
-        """Configure asset by applying mesh configurations"""
+        """Configure asset by applying mesh configurations with partial and wildcard matching.
+
+        Matching rules per JSON entry 'name' (json_match_name):
+        - If it ends with '*': match if mesh_object.name startswith(json_match_name without '*').
+        - Otherwise: match if json_match_name is a substring of mesh_object.name (case-insensitive).
+        - If no config matches a mesh object: default to render=False.
+        Logs each mesh object and the config applied.
+        """
         print(f"[INFO] Configuring asset: {asset['name']}", flush=True)
-        
+
         # Verify render engine is Cycles before configuring mesh objects
         render_engine = bpy.context.scene.render.engine
         print(f"[ASSET_CONFIG] Current render engine: {render_engine}", flush=True)
         if render_engine != "CYCLES":
             print(f"[WARN] Render engine is {render_engine}, not CYCLES. Holdout/shadow_catcher may not work.", flush=True)
-        
-        for mesh in asset.get("meshes", []):
-            self._configure_mesh_object(mesh)
-        
-        print(f"[ASSET_CONFIG] ✅ Asset '{asset['name']}' configured with {len(asset.get('meshes', []))} meshes", flush=True)
+
+        mesh_configs = asset.get("meshes", []) or []
+
+        def _pattern_matches(obj_name: str, pattern: str) -> bool:
+            pn = (pattern or "").strip()
+            if not pn:
+                return False
+            on = obj_name.lower()
+            pn_l = pn.lower()
+            if pn_l.endswith('*'):
+                return on.startswith(pn_l[:-1])
+            return pn_l in on
+
+        # Helper to apply a mesh config directly to an object
+        def _apply_to_object(obj, cfg: Dict):
+            # Compose a minimal config dict expected by _configure_mesh_object logic
+            # but operate directly on obj to avoid name lookup
+            print(f"[MESH_APPLY] → Object '{obj.name}' applying config: {cfg}", flush=True)
+
+            # Render visibility
+            render_enabled = cfg.get("render", True)
+            obj.hide_render = not render_enabled
+            print(f"[MESH_APPLY]   render: {render_enabled} (hide_render: {obj.hide_render})", flush=True)
+
+            # Holdout
+            holdout_enabled = cfg.get("holdout", False)
+            if hasattr(obj, 'is_holdout'):
+                obj.is_holdout = holdout_enabled
+                print(f"[MESH_APPLY]   holdout: {holdout_enabled} (is_holdout: {obj.is_holdout})", flush=True)
+            else:
+                print(f"[MESH_APPLY]   holdout: {holdout_enabled} (NOT APPLIED - unsupported)", flush=True)
+
+            # Shadow catcher
+            shadow_catcher_enabled = cfg.get("shadow_catcher", False)
+            if hasattr(obj, 'is_shadow_catcher'):
+                obj.is_shadow_catcher = shadow_catcher_enabled
+                print(f"[MESH_APPLY]   shadow_catcher: {shadow_catcher_enabled} (is_shadow_catcher: {obj.is_shadow_catcher})", flush=True)
+            else:
+                print(f"[MESH_APPLY]   shadow_catcher: {shadow_catcher_enabled} (NOT APPLIED - unsupported)", flush=True)
+
+            # Viewport visibility
+            show_in_viewport = cfg.get("show_in_viewport", True)
+            obj.hide_viewport = not show_in_viewport
+            try:
+                obj.hide_set(not show_in_viewport)
+            except Exception:
+                pass
+            print(f"[MESH_APPLY]   show_in_viewport: {show_in_viewport} (hide_viewport: {obj.hide_viewport})", flush=True)
+
+        configured_count = 0
+        # Iterate through all mesh objects in the scene
+        for obj in bpy.data.objects:
+            if obj.type != 'MESH':
+                continue
+
+            # Find first matching config for this object
+            matches = []
+            for cfg in mesh_configs:
+                name_pat = cfg.get('name', '')
+                if _pattern_matches(obj.name, name_pat):
+                    matches.append(cfg)
+
+            if matches:
+                chosen = matches[0]
+                print(f"[ASSET_MATCH] Object '{obj.name}' matched config name='{chosen.get('name')}'", flush=True)
+                if len(matches) > 1:
+                    print(f"[ASSET_MATCH]   Note: {len(matches)} configs matched; using first.", flush=True)
+                _apply_to_object(obj, chosen)
+                configured_count += 1
+            else:
+                # Default behavior: render False when no config found
+                default_cfg = {"render": False}
+                print(f"[ASSET_MATCH] Object '{obj.name}' no match. Applying default: {default_cfg}", flush=True)
+                _apply_to_object(obj, default_cfg)
+                configured_count += 1
+
+        print(f"[ASSET_CONFIG] ✅ Asset '{asset['name']}' configured. Objects processed: {configured_count}", flush=True)
     
     def debug_material_assignments(self):
         """Debug which materials are assigned to which objects"""
