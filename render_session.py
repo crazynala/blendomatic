@@ -46,6 +46,7 @@ class RenderSession:
         self._garment_loaded = False
         self._fabric_applied = False
         self.save_debug_files: bool = True
+        self.enable_debug_logging: bool = False
     
     # ---------------------------------------------------------
     # Utility Methods
@@ -118,11 +119,15 @@ class RenderSession:
     # ---------------------------------------------------------
     # Configuration Methods
     # ---------------------------------------------------------
-    def set_save_debug_files(self, enabled: bool) -> None:
-        try:
-            self.save_debug_files = bool(enabled)
-        except Exception:
-            self.save_debug_files = True
+    def set_save_debug_files(self, enabled: bool):
+        """Enable or disable saving debug .blend files"""
+        self.save_debug_files = enabled
+        print(f"[INFO] Save debug files set to: {enabled}")
+
+    def set_enable_debug_logging(self, enabled: bool):
+        """Enable or disable verbose debug logging"""
+        self.enable_debug_logging = enabled
+        print(f"[INFO] Debug logging set to: {enabled}")
     
     def set_mode(self, mode_name: str) -> None:
         """Set render mode and apply settings"""
@@ -289,7 +294,7 @@ class RenderSession:
         
         # Generate output path renders/[mode]/[date]/[garment]
         garment_name = self.garment.get("output_prefix", "garment")
-        fabric_name = self.fabric["name"].lower().replace(" ", "_")
+        fabric_name = self.fabric.get("suffix", self.fabric["name"].lower().replace(" ", "_"))
         asset_suffix = self.asset.get("suffix", self.asset["name"].lower().replace(" ", "_"))
 
         import datetime as _dt

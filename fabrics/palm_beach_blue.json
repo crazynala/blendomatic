@@ -1,5 +1,6 @@
 {
   "name": "Palm Beach Blue",
+  "suffix": "palm_beach_blue",
   "lighting_scene": "scenes/base_scene_light.blend",
   "materials": {
     "main_fabric": {

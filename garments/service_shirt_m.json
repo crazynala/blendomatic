@@ -92,7 +92,7 @@
     {
       "name": "Hidden Placket Variant",
       "suffix": "placket-hidden",
-      "meshes": [        
+      "meshes": [
         {
           "name": "Body SS",
           "shadow_catcher": true
@@ -100,7 +100,7 @@
         {
           "name": "Placket",
           "render": true
-        }     
+        }
       ]
     }
   ]

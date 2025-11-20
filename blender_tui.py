@@ -48,6 +48,8 @@ from path_utils import (
 
 from blender_tui_bridge import BlenderTUISession
 import sys
+from render_state import RenderRunState, BlenderLogParser, AssetStatus
+from execution_screen import ExecutionScreen
 
 # Modal Screen Classes must be defined before use
 if TEXTUAL_AVAILABLE:
@@ -486,8 +488,6 @@ class BlenderTUIApp(App):
         self.garment_list: Optional[SelectionList] = None
         self.fabric_list: Optional[SelectionList] = None
         self.asset_list: Optional[SelectionList] = None
-        self.timeout_checkbox: Optional[Checkbox] = None
-        self.timeout_input: Optional[Input] = None
         self.save_debug_checkbox: Optional[Checkbox] = None
         self.render_button: Optional[Button] = None
         self.cancel_button: Optional[Button] = None
@@ -502,11 +502,8 @@ class BlenderTUIApp(App):
         self.selected_fabrics: List[str] = []
         self.selected_assets: List[str] = []
         
-        # Timeout configuration
-        self.timeout_enabled: bool = True
-        self.timeout_seconds: int = 600  # Default 10 minutes
         # Debug files configuration
-        self.save_debug_files: bool = True
+        self.save_debug_files: bool = False
         
         # Rendering state
         self.is_rendering: bool = False
@@ -519,6 +516,10 @@ class BlenderTUIApp(App):
         self._json_watch_task: Optional[asyncio.Task] = None
         self._json_changed_flag: bool = False
         self._json_last_scan: Dict[str, float] = {}
+
+        # Execution state
+        self.render_state = RenderRunState()
+        self.log_parser = BlenderLogParser(self.render_state)
     
     def _load_json_file(self, file_path: Path) -> Dict[str, Any]:
         """Load a JSON file safely"""
@@ -757,11 +758,6 @@ class BlenderTUIApp(App):
                     'asset': asset,
                     'save_debug_files': self.save_debug_files
                 }
-                
-                # Add timeout configuration if enabled
-                if self.timeout_enabled:
-                    config['timeout_seconds'] = self.timeout_seconds
-                
                 configs.append(config)
         
         return configs
@@ -815,15 +811,10 @@ class BlenderTUIApp(App):
                         except Exception:
                             pass
             
-            # Bottom section: Timeout config and render controls
+            # Bottom section: Render controls
             with Horizontal(classes="controls_row"):
-                with Horizontal(classes="timeout_config"):
-                    self.timeout_checkbox = Checkbox("Use timeout", value=True, id="timeout_checkbox")
-                    yield self.timeout_checkbox
-                    self.timeout_input = Input(value="600", placeholder="Timeout (s)", id="timeout_input")
-                    yield self.timeout_input
                 # Save debug files toggle near render button
-                self.save_debug_checkbox = Checkbox("Save debug files", value=True, id="save_debug_checkbox")
+                self.save_debug_checkbox = Checkbox("Save debug files", value=False, id="save_debug_checkbox")
                 yield self.save_debug_checkbox
                 
                 self.render_button = Button("🎬 RENDER", id="render_btn", variant="success", flat=True)
@@ -1131,30 +1122,13 @@ class BlenderTUIApp(App):
 
     
     async def on_checkbox_changed(self, event):
-        """Handle timeout checkbox changes"""
-        if event.checkbox is self.timeout_checkbox:
-            self.timeout_enabled = event.value
-            if hasattr(self, 'timeout_input'):
-                self.timeout_input.disabled = not self.timeout_enabled
-            await self.update_local_status()
-        elif event.checkbox is self.save_debug_checkbox:
+        """Handle checkbox changes"""
+        if event.checkbox is self.save_debug_checkbox:
             self.save_debug_files = event.value
             await self.update_local_status()
     
-    async def on_input_changed(self, event):
-        """Handle timeout input changes"""
-        if hasattr(event, 'input') and event.input is self.timeout_input:
-            try:
-                value = int(event.value)
-                if value > 0:
-                    self.timeout_seconds = value
-                    await self.update_local_status()
-            except ValueError:
-                pass  # Invalid input, ignore
-    
     async def update_local_status(self):
         """Update message log with current configuration status"""
-        timeout_status = f"{self.timeout_seconds}s" if self.timeout_enabled else "Disabled"
         debug_status = "On" if self.save_debug_files else "Off"
         
         ready = all([self.selected_mode, self.selected_garment, self.selected_fabrics, self.selected_assets])
@@ -1165,7 +1139,7 @@ class BlenderTUIApp(App):
         combinations = len(self.selected_fabrics) * len(self.selected_assets) if self.selected_fabrics and self.selected_assets else 0
         combo_status = f" | 🎯 Will render {combinations} combinations" if combinations > 1 else ""
         
-        self.write_message(f"🔧 Mode: {self.selected_mode or 'Not selected'} | 👔 Garment: {self.selected_garment or 'Not selected'} | 🧵 Fabrics: {fabric_status} | 🎨 Assets: {asset_status}{combo_status} | ⏱️ Timeout: {timeout_status} | 🐞 Debug: {debug_status} | Status: {status}")
+        self.write_message(f"🔧 Mode: {self.selected_mode or 'Not selected'} | 👔 Garment: {self.selected_garment or 'Not selected'} | 🧵 Fabrics: {fabric_status} | 🎨 Assets: {asset_status}{combo_status} | 🐞 Debug: {debug_status} | Status: {status}")
     
     async def tail_log_file(self, log_file_path: str):
         """Tail the Blender log file and stream output to TUI"""
@@ -1173,7 +1147,7 @@ class BlenderTUIApp(App):
         
         while True:
             try:
-                await asyncio.sleep(1.0)  # Check every 1 second
+                await asyncio.sleep(0.5)  # Check more frequently for smoother UI updates
                 
                 if Path(log_file_path).exists():
                     with open(log_file_path, 'r') as f:
@@ -1185,6 +1159,8 @@ class BlenderTUIApp(App):
                             for line in new_content.split('\n'):
                                 if line.strip():
                                     self.write_message(f"🔧 {line}")
+                                    # Parse line for execution dashboard
+                                    self.log_parser.handle_line(line)
                             
                             last_position = f.tell()
                 
@@ -1235,6 +1211,64 @@ class BlenderTUIApp(App):
                     self.write_message("💡 Make sure Blender is installed and accessible via 'blender' command")
                     self.write_message("💡 You can specify path with: python main.py --interface tui --blender-path /path/to/blender")
                     return
+            
+            # Pre-populate render state with planned assets
+            import time
+            self.render_state = RenderRunState(run_started_at=time.time())
+            self.log_parser = BlenderLogParser(self.render_state)
+            
+            # Generate expected output filenames to seed the dashboard
+            # Note: This logic duplicates some filename generation from render_session.py
+            # Ideally we'd get this list from the bridge, but for now we approximate
+            for config in configs:
+                # Construct expected filename: {garment_prefix}-{fabric}-{asset_suffix}.png
+                # We need to know the garment prefix, which might require loading the garment json
+                # For now, we'll use a placeholder or try to load it if possible
+                garment_name = config['garment']
+                fabric_name = config['fabric'].replace(".json", "").lower().replace(" ", "_")
+                
+                # Default asset suffix is name lowercased and underscored
+                asset_suffix = config['asset'].replace(" ", "_").lower()
+                
+                # Try to get real prefix and asset suffix from garment file
+                prefix = "garment"
+                try:
+                    g_path = GARMENTS_DIR / garment_name
+                    if g_path.exists():
+                        with open(g_path) as f:
+                            g_data = json.load(f)
+                            prefix = g_data.get("output_prefix", "garment")
+                            
+                            # Find the asset definition to get the correct suffix
+                            for asset_def in g_data.get("assets", []):
+                                if asset_def.get("name") == config['asset']:
+                                    # Found the asset, check for explicit suffix
+                                    if "suffix" in asset_def:
+                                        asset_suffix = asset_def["suffix"]
+                                    break
+                except:
+                    pass
+
+                # Try to get real fabric suffix from fabric file
+                try:
+                    f_path = FABRICS_DIR / config['fabric']
+                    if f_path.exists():
+                        with open(f_path) as f:
+                            f_data = json.load(f)
+                            if "suffix" in f_data:
+                                fabric_name = f_data["suffix"]
+                except:
+                    pass
+                    
+                # Asset suffix logic from render_session
+                expected_name = f"{prefix}-{fabric_name}-{asset_suffix}.png"
+                
+                # Add to state
+                self.render_state.assets[expected_name] = AssetStatus(name=expected_name, status="pending")
+
+            # Show execution screen
+            exec_screen = ExecutionScreen(self.render_state, name="execution")
+            self.push_screen(exec_screen)
             
             start_time = asyncio.get_event_loop().time()
             successful_renders = []
@@ -1379,8 +1413,17 @@ class BlenderTUIApp(App):
                     exit_code = status.get('exit_code', 0)
                     if exit_code == 0:
                         self.write_message("🎉 Render completed successfully!")
+                        # Mark run as finished in state
+                        if hasattr(self, 'render_state'):
+                            self.render_state.mark_finished()
                     else:
                         self.write_message(f"❌ Render failed with exit code: {exit_code}")
+                        # Mark remaining assets as error in dashboard
+                        if hasattr(self, 'log_parser'):
+                            self.log_parser.mark_all_pending_as_error()
+                        # Also mark finished so timer stops
+                        if hasattr(self, 'render_state'):
+                            self.render_state.mark_finished()
                     
                     # Reset render state
                     self.is_rendering = False
@@ -1432,6 +1475,14 @@ class BlenderTUIApp(App):
                     await asyncio.wait_for(self.current_log_task, timeout=1.0)
                 except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
+            
+            # Mark remaining assets as error in dashboard
+            if hasattr(self, 'log_parser'):
+                self.log_parser.mark_all_pending_as_error()
+            
+            # Mark run as finished
+            if hasattr(self, 'render_state'):
+                self.render_state.mark_finished()
                     
         except Exception as e:
             self.write_message(f"⚠️ Error during cancellation: {e}")

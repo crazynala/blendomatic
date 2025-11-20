@@ -1,5 +1,6 @@
 {
   "name": "Palm Beach Light Gray",
+  "suffix": "palm_beach_light_gray",
   "lighting_scene": "scenes/base_scene_light.blend",
   "materials": {
     "main_fabric": {

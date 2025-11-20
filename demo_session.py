@@ -198,7 +198,7 @@ class MockRenderSession:
         
         # Generate mock output path
         garment_name = self.garment.get("output_prefix", "garment")
-        fabric_name = self.fabric["name"].lower().replace(" ", "_")
+        fabric_name = self.fabric.get("suffix", self.fabric["name"].lower().replace(" ", "_"))
         asset_suffix = self.asset.get("suffix", self.asset["name"].lower().replace(" ", "_"))
         
         filename = f"{garment_name}-{fabric_name}-{asset_suffix}.png"

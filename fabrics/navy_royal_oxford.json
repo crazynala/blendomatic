@@ -1,5 +1,6 @@
 {
   "name": "Navy Royal Oxford",
+  "suffix": "camilla_navy",
   "lighting_scene": "scenes/base_scene_light.blend",
   "materials": {
     "main_fabric": {

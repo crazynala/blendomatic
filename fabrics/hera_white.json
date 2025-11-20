@@ -1,5 +1,6 @@
 {
   "name": "Hera White",
+  "suffix": "hera_white",
   "lighting_scene": "scenes/base_scene_light.blend",
   "materials": {
     "main_fabric": {
