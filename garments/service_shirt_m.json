@@ -323,12 +323,11 @@
       {
         "name": "Placket",
         "render": true,
-        "show_in_viewport": true,
         "holdout": false,
         "shadow_catcher": false
       },
       {
-        "name": "Button.*",
+        "name": "Button.",
         "render": false
       },
       {
