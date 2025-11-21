@@ -24,7 +24,7 @@
       "match_name": "stitch",
       "textures": {},
       "material_params": {
-        "base_color": [0.062 , 0.91, 0.14 , 1],
+        "base_color": [0.141 , 0.106, 0.031 , 1],
         "metallic": 0.0,
         "roughness": 0.83,
         "ior": 1.5,
