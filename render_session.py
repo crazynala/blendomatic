@@ -5,6 +5,7 @@ Separates business logic from UI concerns
 import bpy
 import json
 import os
+import math
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 
@@ -241,6 +242,10 @@ class RenderSession:
         # so we don't need to reassign them - just update their textures
         
         self._fabric_applied = True
+
+        # Apply optional lighting overrides defined on the fabric config
+        self._apply_fabric_lighting(self.fabric)
+
         print(f"[FABRIC] ✅ Fabric '{self.fabric['name']}' applied to existing materials")
     
     def set_asset(self, asset_name: str) -> None:
@@ -659,6 +664,152 @@ class RenderSession:
 
         print(f"[FABRIC] Updated {len(materials_updated)} materials: {materials_updated}")
         return bpy.data.materials[materials_updated[0]] if materials_updated else None
+    
+    def _apply_fabric_lighting(self, fabric: Dict) -> None:
+        """Apply optional lighting overrides provided on the fabric config."""
+        lighting_config = fabric.get("lighting")
+        if not lighting_config:
+            print("[LIGHTING] No lighting overrides defined on fabric; skipping", flush=True)
+            return
+
+        lights = [obj for obj in bpy.data.objects if obj.type == 'LIGHT']
+        if not lights:
+            print("[LIGHTING] Lighting overrides requested but no light objects exist in the scene", flush=True)
+            return
+
+        print(f"[LIGHTING] Applying lighting overrides: {list(lighting_config.keys())}", flush=True)
+        for label, config in lighting_config.items():
+            if not isinstance(config, dict):
+                print(f"[LIGHTING]   ⚠ Skipping '{label}' (expected dict, got {type(config).__name__})", flush=True)
+                continue
+
+            match_name = (config.get("match_name") or label or "").strip()
+            if not match_name:
+                print(f"[LIGHTING]   ⚠ Skipping '{label}' (missing match_name)", flush=True)
+                continue
+
+            match_lower = match_name.lower()
+            matched = [obj for obj in lights if match_lower in obj.name.lower()]
+            exact = next((obj for obj in lights if obj.name == match_name), None)
+            if exact and exact not in matched:
+                matched.insert(0, exact)
+
+            if not matched:
+                print(f"[LIGHTING]   ⚠ No lights matched '{match_name}'", flush=True)
+                continue
+
+            for light_obj in matched:
+                light = light_obj.data
+                print(f"[LIGHTING]   → Updating light '{light_obj.name}'", flush=True)
+
+                original_energy = getattr(light, "energy", None)
+                energy_value = original_energy
+                energy_changed = False
+
+                if "power" in config:
+                    try:
+                        energy_value = float(config["power"])
+                        energy_changed = True
+                        print(f"[LIGHTING]     power: {original_energy} → {energy_value}", flush=True)
+                    except (TypeError, ValueError):
+                        print(f"[LIGHTING]     ⚠ Invalid power value: {config['power']}", flush=True)
+
+                if "exposure" in config:
+                    try:
+                        exposure_factor = math.pow(2.0, float(config["exposure"]))
+                        base_energy = energy_value if energy_value is not None else original_energy
+                        base_energy = base_energy if base_energy is not None else 0.0
+                        energy_value = base_energy * exposure_factor
+                        energy_changed = True
+                        print(f"[LIGHTING]     exposure: {config['exposure']} (×{exposure_factor:.3f})", flush=True)
+                    except (TypeError, ValueError):
+                        print(f"[LIGHTING]     ⚠ Invalid exposure value: {config['exposure']}", flush=True)
+
+                if energy_changed and energy_value is not None and (original_energy is None or not math.isclose(original_energy, energy_value, rel_tol=1e-6)):
+                    light.energy = energy_value
+                    print(f"[LIGHTING]     energy applied: {light.energy}", flush=True)
+
+                color_value = None
+                color_source = None
+                if "color" in config:
+                    color_value = self._parse_color_value(config["color"])
+                    color_source = "color"
+                    if color_value is None:
+                        print(f"[LIGHTING]     ⚠ Invalid color value: {config['color']}", flush=True)
+
+                if color_value is None and "temperature" in config:
+                    color_value = self._kelvin_to_rgb(config["temperature"])
+                    color_source = "temperature"
+                    if color_value is None:
+                        print(f"[LIGHTING]     ⚠ Invalid temperature value: {config['temperature']}", flush=True)
+
+                if color_value is not None:
+                    light.color = color_value
+                    preview = tuple(round(c, 3) for c in color_value)
+                    print(f"[LIGHTING]     {color_source} applied: {preview}", flush=True)
+
+        print("[LIGHTING] Lighting overrides applied", flush=True)
+
+    @staticmethod
+    def _parse_color_value(value):
+        """Parse a color definition (RGB list/tuple or hex string) into a 0-1 tuple."""
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith("#"):
+                text = text[1:]
+            if len(text) in (6, 8):
+                try:
+                    r = int(text[0:2], 16) / 255.0
+                    g = int(text[2:4], 16) / 255.0
+                    b = int(text[4:6], 16) / 255.0
+                    return (r, g, b)
+                except ValueError:
+                    return None
+
+        if isinstance(value, (list, tuple)):
+            try:
+                comps = [float(v) for v in value[:3]]
+            except (TypeError, ValueError):
+                return None
+            if not comps:
+                return None
+            while len(comps) < 3:
+                comps.append(comps[-1])
+            return tuple(max(0.0, min(1.0, c)) for c in comps[:3])
+
+        return None
+
+    @staticmethod
+    def _kelvin_to_rgb(kelvin):
+        """Approximate conversion from color temperature (Kelvin) to RGB tuple."""
+        try:
+            temperature = float(kelvin)
+        except (TypeError, ValueError):
+            return None
+
+        # Clamp to a reasonable range for the formula
+        temperature = max(1000.0, min(40000.0, temperature)) / 100.0
+
+        if temperature <= 66:
+            red = 255.0
+            green = 99.4708025861 * math.log(temperature) - 161.1195681661
+            if temperature <= 19:
+                blue = 0.0
+            else:
+                blue = 138.5177312231 * math.log(temperature - 10.0) - 305.0447927307
+        else:
+            red = 329.698727446 * math.pow(temperature - 60.0, -0.1332047592)
+            green = 288.1221695283 * math.pow(temperature - 60.0, -0.0755148492)
+            blue = 255.0
+
+        def _clamp(channel: float) -> float:
+            return max(0.0, min(255.0, channel))
+
+        red = _clamp(red)
+        green = _clamp(green)
+        blue = _clamp(blue)
+
+        return (red / 255.0, green / 255.0, blue / 255.0)
     
     def _configure_mesh_object(self, mesh_config: Dict) -> None:
         """Configure individual mesh object based on config"""
