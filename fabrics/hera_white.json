@@ -1,7 +1,12 @@
 {
   "name": "Hera White",
   "suffix": "hera_white",
-  "lighting_scene": "scenes/base_scene_light.blend",
+  "lighting": {
+    "arka": {
+      "match_name": "light.arka",
+      "power": 1
+    }
+  },
   "materials": {
     "main_fabric": {
       "match_name": "fabric",
@@ -10,7 +15,7 @@
         "normal": "Fabrics/Hera White Texture/Hera White V2_normal.png",
         "roughness": "Fabrics/Hera White Texture/Hera White V2_rough.exr"
       },
-      "material_params": {        
+      "material_params": {
         "ior": 1
       },
       "hue_sat_params": {
