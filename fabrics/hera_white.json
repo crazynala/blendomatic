@@ -2,9 +2,21 @@
   "name": "Hera White",
   "suffix": "hera_white",
   "lighting": {
-    "arka": {
-      "match_name": "light.arka",
-      "power": 1
+    "backlight": {
+      "match_name": "light.backlight",
+      "power": 30
+    },
+    "leftlight": {
+      "match_name": "light.leftlight",
+      "power": 2
+    },
+    "rightlight": {
+      "match_name": "light.rightlight",
+      "power": 3.4
+    },
+    "toplight": {
+      "match_name": "light.toplight",
+      "power": 6.24
     }
   },
   "materials": {

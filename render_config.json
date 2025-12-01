@@ -13,10 +13,10 @@
     "prod": {
       "engine": "CYCLES",
       "device": "GPU",
-      "samples": 1200,
+      "samples": 1500,
       "preview_samples": 2,
       "adaptive_sampling": true,
-      "resolution": {"x": 1200, "y": 1200, "scale": 100},
+      "resolution": {"x": 4000, "y": 4000, "scale": 100},
       "output_format": "PNG"
     },
     "preview": {

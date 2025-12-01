@@ -1,7 +1,7 @@
 {
-  "name": "Service Shirt (M)",
-  "blend_file": "Service Shirt M - blendo-base - 2nd image.blend",
-  "output_prefix": "service_shirt_M",
+  "name": "Service Shirt (F)",
+  "blend_file": "Service Shirt F - blendo-base.blend",
+  "output_prefix": "service_shirt_F",
   "assets": [
     {
       "name": "Band Collar Variant",
@@ -49,11 +49,35 @@
       ]
     },
     {
+      "name": "Button Down Collar Variant",
+      "suffix": "bd_collar",
+      "meshes": [
+        {
+          "name": "Body SS",
+          "shadow_catcher": true
+        },
+        {
+          "name": "BD Collar",
+		  "render": true
+        },
+        {
+          "name": "Placket",
+          "shadow_catcher": true
+		 
+        },
+        {
+          "name": "Buttonhole_Collar",
+          "render": true
+        }
+      ]
+    },
+    
+    {
       "name": "Body Long Sleeve Variant",
       "suffix": "Body_LS",
       "meshes": [
         {
-          "name": "Body LS.002",
+          "name": "Body LS",
           "render": true
         }
       ]
@@ -86,20 +110,6 @@
         },
         {
           "name": "Buttonhole.Body.*",
-          "render": true
-        }
-      ]
-    },
-    {
-      "name": "Hidden Placket Variant",
-      "suffix": "placket-hidden",
-      "meshes": [
-        {
-          "name": "Body SS",
-          "shadow_catcher": true
-        },
-        {
-          "name": "Placket",
           "render": true
         }
       ]

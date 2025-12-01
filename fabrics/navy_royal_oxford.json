@@ -8,26 +8,27 @@
       "textures": {
         "base_color": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Navy Royal Oxford/Navy Royal Oxford_albedo.png",
         "normal": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Navy Royal Oxford/Navy Royal Oxford_normal.png",
-        "roughness": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Navy Royal Oxford/Navy Royal Oxford_rough.exr"
+        "roughness": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Navy Royal Oxford/Navy Royal Oxford_rough.exr",
+		"displacement": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Navy Royal Oxford/Navy Royal Oxford_displace.exr"
       },
       "material_params": {        
         "ior": 1
       },
       "hue_sat_params": {
-        "hue": 0.45,
-        "saturation": 1.2,
+        "hue": 0.5,
+        "saturation": 0.8,
         "value": 0.1,
-        "fac": 0.85
+        "fac": 1
       }
     },
     "topstitches": {
       "match_name": "stitch",
       "textures": {},
       "material_params": {
-        "base_color": [0, 0.0003, 0.012, 1],
+        "base_color": [0.003, 0.003, 0.007, 1],
         "metallic": 0.0,
         "roughness": 0.83,
-        "ior": 1.5,
+        "ior": 1,
         "alpha": 1.0
       },
       "hue_sat_params": {}
