@@ -264,10 +264,15 @@ class RenderSession:
         if need_reload:
             print(f"[INFO] Loading view '{view_code}' blend file: {blend_path}")
             bpy.ops.wm.open_mainfile(filepath=str(blend_path))
+            self._reapply_mode_settings_if_needed()
         elif view_already_active:
             print(f"[INFO] Render view '{view_code}' already active; reusing loaded scene")
+            self._reapply_mode_settings_if_needed()
         else:
             print(f"[INFO] Blend file already loaded for view '{view_code}': {blend_path}")
+
+            # Even if the file was already open, make sure the selected render mode is re-applied.
+            self._reapply_mode_settings_if_needed()
 
         self.render_view = target_view
         self.render_view_code = view_code
@@ -277,7 +282,17 @@ class RenderSession:
             self.asset = None
             self.material = None
             self._fabric_applied = False
-    
+
+    def _reapply_mode_settings_if_needed(self) -> None:
+        """Ensure the active render mode settings persist after loading a new blend file."""
+        if not self.render_settings:
+            return
+        try:
+            print("[INFO] Re-applying active render mode settings after loading blend file")
+            self._apply_render_settings(self.render_settings)
+        except Exception as exc:
+            print(f"[WARN] Failed to re-apply render settings: {exc}")
+
     def set_fabric(self, fabric_name: str) -> None:
         """Set fabric and update existing materials"""
         match = next((f for f in self.fabrics if f.name == fabric_name), None)
