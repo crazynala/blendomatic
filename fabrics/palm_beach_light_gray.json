@@ -6,9 +6,9 @@
     "main_fabric": {
       "match_name": "fabric",
       "textures": {
-        "base_color": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Palm Beach Light Gray Linen/light_gray_linen_Base_Color.tiff",
-        "normal": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Palm Beach Light Gray Linen/light_gray_linen_Normal.tiff",
-        "roughness": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Palm Beach Light Gray Linen/light_gray_linen_Roughness.tiff"
+        "base_color": "Fabrics/Palm Beach Light Gray Linen/light_gray_linen_Base_Color.tiff",
+        "normal": "Fabrics/Palm Beach Light Gray Linen/light_gray_linen_Normal.tiff",
+        "roughness": "Fabrics/Palm Beach Light Gray Linen/light_gray_linen_Roughness.tiff"
       },
       "material_params": {        
         "ior": 1

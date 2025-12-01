@@ -6,9 +6,9 @@
     "main_fabric": {
       "match_name": "fabric",
       "textures": {
-    "base_color": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Guldogan Mustard/Mustard_albedo.png",
-    "normal": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Guldogan Mustard/Mustard_normal.png",
-    "roughness": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Guldogan Mustard/Mustard_rough.exr"
+    "base_color": "Fabrics/Guldogan Mustard/Mustard_albedo.png",
+    "normal": "Fabrics/Guldogan Mustard/Mustard_normal.png",
+    "roughness": "Fabrics/Guldogan Mustard/Mustard_rough.exr"
       },
       "material_params": {        
         "ior": 1

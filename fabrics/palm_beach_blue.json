@@ -6,9 +6,9 @@
     "main_fabric": {
       "match_name": "fabric",
       "textures": {
-        "base_color": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Palm Beach Blue Linen/blue_linen_Base_Color.tif",
-        "normal": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Palm Beach Blue Linen/blue_linen_Normal.tif",
-        "roughness": "/Users/emre/Sartor Dropbox/DesignLab/Smock Supply/Blender Projects/Fabric Textures/Palm Beach Blue Linen/blue_linen_Roughness.tif"
+        "base_color": "Fabrics/Palm Beach Blue Linen/blue_linen_Base_Color.tif",
+        "normal": "Fabrics/Palm Beach Blue Linen/blue_linen_Normal.tif",
+        "roughness": "Fabrics/Palm Beach Blue Linen/blue_linen_Roughness.tif"
       },
       "material_params": {        
         "ior": 1
