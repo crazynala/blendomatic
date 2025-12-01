@@ -14,7 +14,7 @@ try:
     from textual.containers import Container, Horizontal, Vertical
     from textual.widgets import Header, Footer, Static, Button, SelectionList, Label, Log, Checkbox, Input
     from textual.screen import Screen
-    from textual import on, events
+    from textual import on
     TEXTUAL_AVAILABLE = True
 except ImportError:
     TEXTUAL_AVAILABLE = False
@@ -265,50 +265,9 @@ if TEXTUAL_AVAILABLE:
     except Exception:
         JsonErrorsModal = None  # type: ignore
 
-    class GarmentSelectionList(SelectionList):
-        """SelectionList variant that only toggles when its checkbox is clicked."""
-
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self._last_pointer_on_checkbox: bool = True
-
-        def on_click(self, event: events.Click) -> None:  # type: ignore[override]
-            try:
-                gutter = self._get_left_gutter_width()
-                # Checkbox lives inside the left gutter area; clicks past it should not toggle.
-                self._last_pointer_on_checkbox = event.x <= gutter if gutter else True
-            except Exception:
-                self._last_pointer_on_checkbox = True
-            if not self._last_pointer_on_checkbox:
-                try:
-                    option_index = getattr(event.style, "meta", {}).get("option")
-                except Exception:
-                    option_index = None
-                if option_index is not None:
-                    try:
-                        self.index = option_index  # Move highlight without toggling checkbox
-                    except Exception:
-                        pass
-                event.stop()
-                return None
-            handler = getattr(super(), "on_click", None)
-            if handler:
-                return handler(event)
-            return None
-
-        def _on_option_list_option_selected(self, event):  # type: ignore[override]
-            is_checkbox = getattr(self, "_last_pointer_on_checkbox", True)
-            # Reset after each click to keep keyboard toggles functional.
-            self._last_pointer_on_checkbox = True
-            if not is_checkbox:
-                event.stop()
-                return
-            super()._on_option_list_option_selected(event)
 else:
     JsonErrorModal = None  # type: ignore
     JsonErrorsModal = None  # type: ignore
-    class GarmentSelectionList(SelectionList):
-        pass
 
 class BlenderTUIApp(App):
     """
@@ -1002,7 +961,7 @@ class BlenderTUIApp(App):
                 
                 # Middle column: Garments
                 with Vertical(classes="middle_column"):
-                    self.garment_list = GarmentSelectionList(id="garment_list")
+                    self.garment_list = SelectionList(id="garment_list")
                     yield self.garment_list
                     try:
                         self.garment_list.border_title = "Garment"
@@ -1425,18 +1384,6 @@ class BlenderTUIApp(App):
 
         await self.update_local_status()
 
-    @on(SelectionList.SelectionHighlighted, "#garment_list")  # type: ignore[attr-defined]
-    async def handle_garment_highlight(self, event):
-        """Update preview selections as the focused garment row changes."""
-        garment_value = getattr(getattr(event, "selection", None), "value", None)
-        if not garment_value or garment_value == self.current_garment_name:
-            return
-        self.current_garment_name = garment_value
-        display_name = self.garment_display_names.get(garment_value, garment_value)
-        self.write_message(f"👗 Previewing garment: {display_name}")
-        await self.refresh_view_list()
-        await self.refresh_assets_list()
-        await self.update_local_status()
     
 
 
