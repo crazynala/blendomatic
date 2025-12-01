@@ -189,3 +189,4 @@ Thumbs.db
 
 # Project specific temporary directories
 blendomatic_*/
+node_modules
