@@ -2,6 +2,13 @@
   "name": "Service Shirt (F)",
   "blend_file": "Service Shirt F - blendo-base.blend",
   "output_prefix": "service_shirt_F",
+  "views": [
+    {
+      "code": "default",
+      "blend_file": "Service Shirt F - blendo-base.blend",
+      "output_prefix": "service_shirt_F"
+    }
+  ],
   "assets": [
     {
       "name": "Band Collar Variant",

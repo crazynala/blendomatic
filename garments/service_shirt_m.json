@@ -2,6 +2,18 @@
   "name": "Service Shirt (M)",
   "blend_file": "Service Shirt M - blendo-base - 2nd image.blend",
   "output_prefix": "service_shirt_M",
+  "views": [
+    {
+      "code": "full",
+      "blend_file": "Service Shirt M - blendo-base.blend",
+      "output_prefix": "service_shirt_M_full"
+    },
+    {
+      "code": "zoom",
+      "blend_file": "Service Shirt M - blendo-base - 2nd image.blend",
+      "output_prefix": "service_shirt_M_zoom"
+    }
+  ],
   "assets": [
     {
       "name": "Band Collar Variant",

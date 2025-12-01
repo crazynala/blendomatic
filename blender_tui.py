@@ -14,7 +14,7 @@ try:
     from textual.containers import Container, Horizontal, Vertical
     from textual.widgets import Header, Footer, Static, Button, SelectionList, Label, Log, Checkbox, Input
     from textual.screen import Screen
-    from textual import on
+    from textual import on, events
     TEXTUAL_AVAILABLE = True
 except ImportError:
     TEXTUAL_AVAILABLE = False
@@ -28,7 +28,8 @@ except ImportError:
     class Static: pass
     class Button: 
         class Pressed: pass
-    class SelectionList: pass
+    class SelectionList:
+        SelectionHighlighted = object()
     class Label: pass
     class Log: pass
     class Checkbox: pass
@@ -263,9 +264,51 @@ if TEXTUAL_AVAILABLE:
                         pass
     except Exception:
         JsonErrorsModal = None  # type: ignore
+
+    class GarmentSelectionList(SelectionList):
+        """SelectionList variant that only toggles when its checkbox is clicked."""
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._last_pointer_on_checkbox: bool = True
+
+        def on_click(self, event: events.Click) -> None:  # type: ignore[override]
+            try:
+                gutter = self._get_left_gutter_width()
+                # Checkbox lives inside the left gutter area; clicks past it should not toggle.
+                self._last_pointer_on_checkbox = event.x <= gutter if gutter else True
+            except Exception:
+                self._last_pointer_on_checkbox = True
+            if not self._last_pointer_on_checkbox:
+                try:
+                    option_index = getattr(event.style, "meta", {}).get("option")
+                except Exception:
+                    option_index = None
+                if option_index is not None:
+                    try:
+                        self.index = option_index  # Move highlight without toggling checkbox
+                    except Exception:
+                        pass
+                event.stop()
+                return None
+            handler = getattr(super(), "on_click", None)
+            if handler:
+                return handler(event)
+            return None
+
+        def _on_option_list_option_selected(self, event):  # type: ignore[override]
+            is_checkbox = getattr(self, "_last_pointer_on_checkbox", True)
+            # Reset after each click to keep keyboard toggles functional.
+            self._last_pointer_on_checkbox = True
+            if not is_checkbox:
+                event.stop()
+                return
+            super()._on_option_list_option_selected(event)
 else:
     JsonErrorModal = None  # type: ignore
     JsonErrorsModal = None  # type: ignore
+    class GarmentSelectionList(SelectionList):
+        pass
 
 class BlenderTUIApp(App):
     """
@@ -329,6 +372,11 @@ class BlenderTUIApp(App):
     }
 
     #mode_list {
+        height: 5;
+        overflow-y: auto;
+        border: solid $primary;
+    }
+    #view_list {
         height: 5;
         overflow-y: auto;
         border: solid $primary;
@@ -488,6 +536,8 @@ class BlenderTUIApp(App):
         self.garment_list: Optional[SelectionList] = None
         self.fabric_list: Optional[SelectionList] = None
         self.asset_list: Optional[SelectionList] = None
+        self.view_list: Optional[SelectionList] = None
+        self.toggle_all_checkbox: Optional[Checkbox] = None
         self.save_debug_checkbox: Optional[Checkbox] = None
         self.render_button: Optional[Button] = None
         self.cancel_button: Optional[Button] = None
@@ -501,6 +551,7 @@ class BlenderTUIApp(App):
         self.selected_garment: Optional[str] = None  
         self.selected_fabrics: List[str] = []
         self.selected_assets: List[str] = []
+        self.selected_views: List[str] = []
         
         # Debug files configuration
         self.save_debug_files: bool = False
@@ -516,6 +567,18 @@ class BlenderTUIApp(App):
         self._json_watch_task: Optional[asyncio.Task] = None
         self._json_changed_flag: bool = False
         self._json_last_scan: Dict[str, float] = {}
+
+        # Cached data for toggle-all / recall logic
+        self.available_garments: List[str] = []
+        self.available_fabrics: List[str] = []
+        self.available_assets: List[str] = []
+        self.available_views: List[str] = []
+
+        # Display name + per-garment selection caches
+        self.garment_display_names: Dict[str, str] = {}
+        self.fabric_display_names: Dict[str, str] = {}
+        self.asset_selection_by_garment: Dict[str, List[str]] = {}
+        self.view_selection_by_garment: Dict[str, List[str]] = {}
 
         # Execution state
         self.render_state = RenderRunState()
@@ -701,17 +764,31 @@ class BlenderTUIApp(App):
                 if JsonErrorsModal is not None:
                     self.push_screen(JsonErrorsModal(dict(self._json_errors)))
     
-    def _get_local_garments(self) -> List[str]:
-        """Get list of available garment files"""
+    def _get_local_garments(self) -> List[Dict[str, str]]:
+        """Return garment filenames with user-facing display names."""
+        garments: List[Dict[str, str]] = []
         if not GARMENTS_DIR.exists():
-            return []
-        return [f.name for f in GARMENTS_DIR.glob("*.json")]
+            return garments
+        for file_path in sorted(GARMENTS_DIR.glob("*.json")):
+            display_name = file_path.stem
+            data = self._load_json_file(file_path)
+            if isinstance(data, dict):
+                display_name = data.get("name") or display_name
+            garments.append({"file_name": file_path.name, "display_name": display_name})
+        return garments
     
-    def _get_local_fabrics(self) -> List[str]:
-        """Get list of available fabric files"""
+    def _get_local_fabrics(self) -> List[Dict[str, str]]:
+        """Return fabric filenames with user-facing display names."""
+        fabrics: List[Dict[str, str]] = []
         if not FABRICS_DIR.exists():
-            return []
-        return [f.name for f in FABRICS_DIR.glob("*.json")]
+            return fabrics
+        for file_path in sorted(FABRICS_DIR.glob("*.json")):
+            display_name = file_path.stem
+            data = self._load_json_file(file_path)
+            if isinstance(data, dict):
+                display_name = data.get("name") or display_name
+            fabrics.append({"file_name": file_path.name, "display_name": display_name})
+        return fabrics
     
     def _get_garment_assets(self, garment_name: str) -> List[str]:
         """Get assets for a specific garment from local file"""
@@ -725,40 +802,174 @@ class BlenderTUIApp(App):
         garment_data = self._load_json_file(garment_path)
         assets = garment_data.get("assets", [])
         return [asset.get("name", "") for asset in assets if asset.get("name")]
+
+    def _extract_garment_views(self, garment_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Normalize view definitions from a garment file."""
+        views: List[Dict[str, Any]] = []
+        fallback_blend = garment_data.get("blend_file")
+        fallback_prefix = garment_data.get("output_prefix") or garment_data.get("name") or "garment"
+        raw_views = garment_data.get("views")
+
+        if isinstance(raw_views, list) and raw_views:
+            for view in raw_views:
+                if not isinstance(view, dict):
+                    continue
+                code = (view.get("code") or "").strip()
+                blend_file = view.get("blend_file") or fallback_blend
+                output_prefix = view.get("output_prefix") or fallback_prefix
+                if not code or not blend_file:
+                    continue
+                views.append({
+                    "code": code,
+                    "blend_file": blend_file,
+                    "output_prefix": output_prefix,
+                })
+
+        if not views and fallback_blend:
+            views.append({
+                "code": garment_data.get("default_view", "default"),
+                "blend_file": fallback_blend,
+                "output_prefix": fallback_prefix,
+            })
+
+        return views
+
+    def _set_selection_values(self, selection_list: Optional[SelectionList], values: List[str]) -> None:
+        """Synchronize a SelectionList with explicit values."""
+        if not selection_list:
+            return
+        try:
+            selection_list.deselect_all()
+        except Exception:
+            pass
+        for value in values:
+            try:
+                selection_list.select(value)
+            except Exception:
+                continue
+
+    def _get_display_label(self, mapping: Dict[str, str], key: Optional[str]) -> str:
+        if not key:
+            return "Not selected"
+        return mapping.get(key, key)
+
+    def _get_views_for_garment(self, garment_name: Optional[str]) -> List[str]:
+        if not garment_name:
+            return []
+        if garment_name == self.current_garment_name:
+            return list(self.selected_views)
+        return list(self.view_selection_by_garment.get(garment_name, []))
+
+    def _get_assets_for_garment(self, garment_name: Optional[str]) -> List[str]:
+        if not garment_name:
+            return []
+        if garment_name == self.current_garment_name:
+            return list(self.selected_assets)
+        return list(self.asset_selection_by_garment.get(garment_name, []))
     
 
     
-    def validate_render_config(self) -> List[Dict[str, str]]:
-        """Validate all selections and return list of render configurations (fabric x asset combinations)"""
+    def validate_render_config(self) -> List[Dict[str, Any]]:
+        """Validate selections and return list of fabric × asset × view combinations."""
         errors = []
         
         if not self.selected_mode:
             errors.append("Mode not selected")
-            
         if not self.selected_garment:
-            errors.append("Garment not selected") 
-            
+            errors.append("Garment not selected")
         if not self.selected_fabrics:
             errors.append("No fabrics selected")
-            
-        if not self.selected_assets:
-            errors.append("No assets selected")
         
         if errors:
             raise ValueError(f"Missing selections: {', '.join(errors)}")
-        
-        # Generate all fabric x asset combinations
-        configs = []
+
+        assets_for_render = self._get_assets_for_garment(self.selected_garment)
+        views_for_render = self._get_views_for_garment(self.selected_garment)
+
+        if not assets_for_render:
+            raise ValueError("Missing selections: No assets selected")
+        if not views_for_render:
+            raise ValueError("Missing selections: No views selected")
+
+        garment_path = GARMENTS_DIR / self.selected_garment
+        if not garment_path.exists():
+            raise ValueError(f"Garment file not found: {garment_path}")
+
+        garment_data = self._load_json_file(garment_path)
+        if not garment_data:
+            raise ValueError(f"Failed to load garment: {self.selected_garment}")
+
+        views = self._extract_garment_views(garment_data)
+        if not views:
+            raise ValueError(f"Garment '{garment_data.get('name', self.selected_garment)}' has no views configured")
+
+        views_by_code = {view["code"]: view for view in views}
+        ordered_view_codes = [view["code"] for view in views]
+
+        selected_view_pool = set(views_for_render)
+        selected_view_codes = [code for code in ordered_view_codes if code in selected_view_pool]
+        if not selected_view_codes:
+            if views_for_render:
+                self.write_message("⚠️ Selected views are not available on this garment; using all views instead")
+            selected_view_codes = ordered_view_codes
+        selected_view_set = set(selected_view_codes)
+
+        asset_map = {
+            asset.get("name"): asset
+            for asset in garment_data.get("assets", [])
+            if asset.get("name")
+        }
+
+        configs: List[Dict[str, Any]] = []
         for fabric in self.selected_fabrics:
-            for asset in self.selected_assets:
-                config = {
-                    'mode': self.selected_mode,
-                    'garment': self.selected_garment,
-                    'fabric': fabric,
-                    'asset': asset,
-                    'save_debug_files': self.save_debug_files
-                }
-                configs.append(config)
+            for asset_name in assets_for_render:
+                asset_def = asset_map.get(asset_name)
+                if not asset_def:
+                    raise ValueError(f"Asset '{asset_name}' not found in garment definition")
+
+                raw_requested = asset_def.get("render_views")
+                if isinstance(raw_requested, list) and raw_requested:
+                    requested_views = [str(code) for code in raw_requested if isinstance(code, (str, int))]
+                elif isinstance(raw_requested, str) and raw_requested:
+                    requested_views = [raw_requested]
+                elif raw_requested:
+                    requested_views = [str(raw_requested)]
+                else:
+                    requested_views = ordered_view_codes
+
+                requested_set = set(requested_views)
+                valid_views = [
+                    code
+                    for code in ordered_view_codes
+                    if code in requested_set and code in selected_view_set
+                ]
+
+                missing_views = [code for code in requested_views if code not in views_by_code]
+                if missing_views:
+                    self.write_message(
+                        f"⚠️ Asset '{asset_name}' references unknown views: {', '.join(missing_views)}"
+                    )
+
+                if not valid_views:
+                    raise ValueError(
+                        f"Asset '{asset_name}' is not configured for any of the selected views (selected: {', '.join(selected_view_codes)})"
+                    )
+
+                asset_suffix = asset_def.get('suffix') or asset_name.replace(" ", "_").lower()
+
+                for view_code in valid_views:
+                    view_info = views_by_code.get(view_code, {})
+                    config = {
+                        'mode': self.selected_mode,
+                        'garment': self.selected_garment,
+                        'fabric': fabric,
+                        'asset': asset_name,
+                        'view': view_code,
+                        'view_output_prefix': view_info.get('output_prefix'),
+                        'asset_suffix': asset_suffix,
+                        'save_debug_files': self.save_debug_files
+                    }
+                    configs.append(config)
         
         return configs
     
@@ -772,6 +983,8 @@ class BlenderTUIApp(App):
                 with Vertical(classes="left_column"):
                     self.mode_list = SelectionList(id="mode_list")
                     yield self.mode_list
+                    self.toggle_all_checkbox = Checkbox("Select All", value=False, id="toggle_all_checkbox")
+                    yield self.toggle_all_checkbox
                     self.fabric_list = SelectionList(id="fabric_list")
                     yield self.fabric_list
                     # Set border titles programmatically (Textual doesn't support border-title in CSS)
@@ -789,7 +1002,7 @@ class BlenderTUIApp(App):
                 
                 # Middle column: Garments
                 with Vertical(classes="middle_column"):
-                    self.garment_list = SelectionList(id="garment_list")
+                    self.garment_list = GarmentSelectionList(id="garment_list")
                     yield self.garment_list
                     try:
                         self.garment_list.border_title = "Garment"
@@ -801,8 +1014,17 @@ class BlenderTUIApp(App):
                 
                 # Right column: Assets
                 with Vertical(classes="right_column"):
+                    self.view_list = SelectionList(id="view_list")
+                    yield self.view_list
                     self.asset_list = SelectionList(id="asset_list")
                     yield self.asset_list
+                    try:
+                        self.view_list.border_title = "Views"
+                    except Exception:
+                        try:
+                            self.view_list.styles.border_title = "Views"
+                        except Exception:
+                            pass
                     try:
                         self.asset_list.border_title = "Asset"
                     except Exception:
@@ -996,19 +1218,36 @@ class BlenderTUIApp(App):
             fabrics = await asyncio.get_event_loop().run_in_executor(
                 None, self._get_local_fabrics
             )
+            self.available_garments = [g["file_name"] for g in garments]
+            self.available_fabrics = [f["file_name"] for f in fabrics]
+            self.garment_display_names = {g["file_name"]: g["display_name"] for g in garments}
+            self.fabric_display_names = {f["file_name"]: f["display_name"] for f in fabrics}
+
+            # Drop cached selections for removed garments
+            self.asset_selection_by_garment = {
+                garment: selections
+                for garment, selections in self.asset_selection_by_garment.items()
+                if garment in self.available_garments
+            }
+            self.view_selection_by_garment = {
+                garment: selections
+                for garment, selections in self.view_selection_by_garment.items()
+                if garment in self.available_garments
+            }
+
+            if self.current_garment_name and self.current_garment_name not in self.available_garments:
+                self.current_garment_name = None
+                self.selected_garment = None
+                self.selected_views = []
+                self.selected_assets = []
+                self.available_views = []
+                self.available_assets = []
             # Debug: which directories are being used
             try:
                 self.write_message(f"🔧 DEBUG: GARMENTS_DIR = {GARMENTS_DIR}")
                 self.write_message(f"🔧 DEBUG: FABRICS_DIR = {FABRICS_DIR}")
             except Exception:
                 pass
-            
-            # Get assets for current garment (if any)
-            assets = []
-            if self.current_garment_name:
-                assets = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: self._get_garment_assets(self.current_garment_name)
-                )
             
             # Update lists
             if self.mode_list:
@@ -1020,22 +1259,21 @@ class BlenderTUIApp(App):
             if self.garment_list:
                 self.garment_list.clear_options()
                 for garment in garments:
-                    self.garment_list.add_option((garment, garment))
+                    self.garment_list.add_option((garment["display_name"], garment["file_name"]))
                 
             if self.fabric_list:
                 self.fabric_list.clear_options()
                 for fabric in fabrics:
-                    self.fabric_list.add_option((fabric, fabric))
-                
-            if self.asset_list:
-                self.asset_list.clear_options()
-                for asset in assets:
-                    self.asset_list.add_option((asset, asset))
+                    self.fabric_list.add_option((fabric["display_name"], fabric["file_name"]))
             
+            await self.refresh_view_list()
+            await self.refresh_assets_list()
+
             # Debug info about loaded data
-            self.write_message(f"📋 Lists refreshed - Modes: {len(modes)}, Garments: {len(garments)}, Fabrics: {len(fabrics)}, Assets: {len(assets)}")
-            if assets:
-                self.write_message(f"Available assets: {', '.join(assets)}")
+            asset_count = len(self.available_assets)
+            self.write_message(f"📋 Lists refreshed - Modes: {len(modes)}, Garments: {len(garments)}, Fabrics: {len(fabrics)}, Assets: {asset_count}")
+            if asset_count:
+                self.write_message(f"Available assets: {', '.join(self.available_assets)}")
             else:
                 self.write_message("No assets loaded (garment must be selected first)")
             
@@ -1051,19 +1289,35 @@ class BlenderTUIApp(App):
             return
         
         try:
-            # Get assets from local garment file (no bridge needed)
-            assets = []
+            assets: List[str] = []
             if self.current_garment_name:
-                self.write_message(f"🔍 DEBUG: Getting assets for garment: {self.current_garment_name}")
-                assets = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: self._get_garment_assets(self.current_garment_name)
-                )
-                self.write_message(f"🔍 DEBUG: Found {len(assets)} assets: {assets}")
+                if self.current_garment_name not in self.available_garments:
+                    self.write_message("🔍 DEBUG: Current garment no longer available; clearing assets list")
+                else:
+                    self.write_message(f"🔍 DEBUG: Getting assets for garment: {self.current_garment_name}")
+                    assets = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: self._get_garment_assets(self.current_garment_name)
+                    )
+                    self.write_message(f"🔍 DEBUG: Found {len(assets)} assets: {assets}")
             
             self.asset_list.clear_options()
             for asset in assets:
                 self.asset_list.add_option((asset, asset))
-            
+
+            if self.current_garment_name:
+                cached_selection = self.asset_selection_by_garment.get(self.current_garment_name)
+                if cached_selection:
+                    selection = [asset for asset in cached_selection if asset in assets]
+                else:
+                    selection = []
+                self.asset_selection_by_garment[self.current_garment_name] = selection
+                self.selected_assets = list(selection)
+                self._set_selection_values(self.asset_list, selection)
+            else:
+                self.selected_assets = []
+
+            self.available_assets = list(assets)
+
             # Debug info
             if assets:
                 self.write_message(f"🎯 Assets refreshed ({len(assets)} available): {', '.join(assets)}")
@@ -1074,6 +1328,115 @@ class BlenderTUIApp(App):
             self.write_message(f"❌ Failed to refresh assets: {e}")
             import traceback
             self.write_message(f"🔍 DEBUG: Traceback: {traceback.format_exc()}")
+
+    async def refresh_view_list(self):
+        """Refresh the view list whenever the garment context changes."""
+        if not self.view_list:
+            return
+
+        try:
+            if not self.current_garment_name:
+                self.view_list.clear_options()
+                self.available_views = []
+                self.selected_views = []
+                self.write_message("👁 No garment selected - view list cleared")
+                return
+            if self.current_garment_name not in self.available_garments:
+                self.view_list.clear_options()
+                self.available_views = []
+                self.selected_views = []
+                self.write_message("👁 Current garment not found - view list cleared")
+                return
+
+            garment_path = GARMENTS_DIR / self.current_garment_name
+
+            def _load_views() -> List[Dict[str, Any]]:
+                data = self._load_json_file(garment_path)
+                return self._extract_garment_views(data)
+
+            views = await asyncio.get_event_loop().run_in_executor(None, _load_views)
+            self.view_list.clear_options()
+            codes: List[str] = []
+            for view in views:
+                code = view.get("code")
+                if not code:
+                    continue
+                codes.append(code)
+                self.view_list.add_option((code, code))
+
+            self.available_views = codes
+
+            cached_selection = self.view_selection_by_garment.get(self.current_garment_name)
+            if cached_selection:
+                selection = [code for code in cached_selection if code in codes]
+            else:
+                selection = []
+            self.view_selection_by_garment[self.current_garment_name] = selection
+            self.selected_views = list(selection)
+            self._set_selection_values(self.view_list, selection)
+
+            if codes:
+                self.write_message(f"👁 Views available ({len(codes)}): {', '.join(codes)}")
+            else:
+                self.write_message("👁 Garment has no view definitions")
+        except Exception as e:
+            self.write_message(f"❌ Failed to refresh views: {e}")
+
+    async def _apply_toggle_all(self, select_all: bool) -> None:
+        """Select or clear all options across the major lists."""
+        if select_all:
+            self._set_selection_values(self.fabric_list, self.available_fabrics)
+            self.selected_fabrics = list(self.available_fabrics)
+
+            self._set_selection_values(self.garment_list, self.available_garments)
+            if not self.current_garment_name and self.available_garments:
+                self.current_garment_name = self.available_garments[0]
+                self.selected_garment = self.current_garment_name
+                await self.refresh_view_list()
+                await self.refresh_assets_list()
+            else:
+                if not self.available_views:
+                    await self.refresh_view_list()
+                if not self.available_assets:
+                    await self.refresh_assets_list()
+
+            self._set_selection_values(self.view_list, self.available_views)
+            self.selected_views = list(self.available_views)
+            if self.current_garment_name:
+                self.view_selection_by_garment[self.current_garment_name] = list(self.available_views)
+
+            self._set_selection_values(self.asset_list, self.available_assets)
+            self.selected_assets = list(self.available_assets)
+            if self.current_garment_name:
+                self.asset_selection_by_garment[self.current_garment_name] = list(self.available_assets)
+        else:
+            for widget in (self.fabric_list, self.garment_list, self.view_list, self.asset_list):
+                self._set_selection_values(widget, [])
+            self.selected_fabrics = []
+            self.selected_assets = []
+            self.selected_views = []
+            self.selected_garment = None
+            self.current_garment_name = None
+            self.available_views = []
+            self.view_selection_by_garment.clear()
+            self.asset_selection_by_garment.clear()
+            await self.refresh_view_list()
+            await self.refresh_assets_list()
+
+        await self.update_local_status()
+
+    @on(SelectionList.SelectionHighlighted, "#garment_list")  # type: ignore[attr-defined]
+    async def handle_garment_highlight(self, event):
+        """Update preview selections as the focused garment row changes."""
+        garment_value = getattr(getattr(event, "selection", None), "value", None)
+        if not garment_value or garment_value == self.current_garment_name:
+            return
+        self.current_garment_name = garment_value
+        display_name = self.garment_display_names.get(garment_value, garment_value)
+        self.write_message(f"👗 Previewing garment: {display_name}")
+        await self.refresh_view_list()
+        await self.refresh_assets_list()
+        await self.update_local_status()
     
 
 
@@ -1094,28 +1457,54 @@ class BlenderTUIApp(App):
                 garment = selected[0] if isinstance(selected, list) else selected
                 self.current_garment_name = garment
                 self.selected_garment = garment
-                self.write_message(f"✅ Garment selected: {garment}")
+                display_name = self.garment_display_names.get(garment, garment)
+                self.write_message(f"✅ Garment selected: {display_name}")
+                await self.refresh_view_list()
                 await self.refresh_assets_list()
+            else:
+                self.selected_garment = None
+                self.write_message("👔 Garment checkbox cleared")
         elif list_id == "fabric_list":
-            if self.fabric_list and self.fabric_list.selected:
+            if self.fabric_list:
                 self.selected_fabrics = list(self.fabric_list.selected)
                 fabric_count = len(self.selected_fabrics)
-                if fabric_count == 1:
-                    self.write_message(f"✅ Fabric selected: {self.selected_fabrics[0]}")
+                if fabric_count == 0:
+                    self.write_message("⚠️ No fabrics selected")
+                elif fabric_count == 1:
+                    fabric_label = self.fabric_display_names.get(self.selected_fabrics[0], self.selected_fabrics[0])
+                    self.write_message(f"✅ Fabric selected: {fabric_label}")
                 else:
-                    self.write_message(f"✅ {fabric_count} fabrics selected: {', '.join(self.selected_fabrics)}")
+                    self.write_message(f"✅ {fabric_count} fabrics selected")
         elif list_id == "asset_list":
             if not self.current_garment_name:
                 self.write_message("❌ Please select a garment first")
                 return
                 
-            if self.asset_list and self.asset_list.selected:
+            if self.asset_list:
                 self.selected_assets = list(self.asset_list.selected)
+                self.asset_selection_by_garment[self.current_garment_name] = list(self.selected_assets)
                 asset_count = len(self.selected_assets)
-                if asset_count == 1:
+                if asset_count == 0:
+                    self.write_message("⚠️ No assets selected")
+                elif asset_count == 1:
                     self.write_message(f"✅ Asset selected: {self.selected_assets[0]}")
                 else:
                     self.write_message(f"✅ {asset_count} assets selected: {', '.join(self.selected_assets)}")
+        elif list_id == "view_list":
+            if not self.current_garment_name:
+                self.write_message("❌ Please select a garment first")
+                return
+
+            if self.view_list:
+                self.selected_views = list(self.view_list.selected)
+                self.view_selection_by_garment[self.current_garment_name] = list(self.selected_views)
+                view_count = len(self.selected_views)
+                if view_count == 0:
+                    self.write_message("⚠️ No views selected")
+                elif view_count == 1:
+                    self.write_message(f"✅ View selected: {self.selected_views[0]}")
+                else:
+                    self.write_message(f"✅ {view_count} views selected: {', '.join(self.selected_views)}")
         
         await self.update_local_status()
     
@@ -1126,20 +1515,39 @@ class BlenderTUIApp(App):
         if event.checkbox is self.save_debug_checkbox:
             self.save_debug_files = event.value
             await self.update_local_status()
+        elif event.checkbox is self.toggle_all_checkbox:
+            await self._apply_toggle_all(event.value)
     
     async def update_local_status(self):
         """Update message log with current configuration status"""
         debug_status = "On" if self.save_debug_files else "Off"
         
-        ready = all([self.selected_mode, self.selected_garment, self.selected_fabrics, self.selected_assets])
+        assets_for_selected = self._get_assets_for_garment(self.selected_garment)
+        views_for_selected = self._get_views_for_garment(self.selected_garment)
+
+        ready = all([
+            self.selected_mode,
+            self.selected_garment,
+            self.selected_fabrics,
+            assets_for_selected,
+            views_for_selected,
+        ])
         status = 'Ready to render' if ready else 'Configuration incomplete'
         
         fabric_status = f"{len(self.selected_fabrics)} selected" if self.selected_fabrics else "Not selected"
-        asset_status = f"{len(self.selected_assets)} selected" if self.selected_assets else "Not selected"
-        combinations = len(self.selected_fabrics) * len(self.selected_assets) if self.selected_fabrics and self.selected_assets else 0
+        asset_status = f"{len(assets_for_selected)} selected" if assets_for_selected else "Not selected"
+        view_status = f"{len(views_for_selected)} selected" if views_for_selected else "Not selected"
+        combinations = (
+            len(self.selected_fabrics) * len(assets_for_selected) * len(views_for_selected)
+            if self.selected_fabrics and assets_for_selected and views_for_selected else 0
+        )
         combo_status = f" | 🎯 Will render {combinations} combinations" if combinations > 1 else ""
         
-        self.write_message(f"🔧 Mode: {self.selected_mode or 'Not selected'} | 👔 Garment: {self.selected_garment or 'Not selected'} | 🧵 Fabrics: {fabric_status} | 🎨 Assets: {asset_status}{combo_status} | 🐞 Debug: {debug_status} | Status: {status}")
+        garment_label = self._get_display_label(self.garment_display_names, self.selected_garment)
+        self.write_message(
+            f"🔧 Mode: {self.selected_mode or 'Not selected'} | 👔 Garment: {garment_label} | "
+            f"🧵 Fabrics: {fabric_status} | 👁 Views: {view_status} | 🎨 Assets: {asset_status}{combo_status} | 🐞 Debug: {debug_status} | Status: {status}"
+        )
     
     async def tail_log_file(self, log_file_path: str):
         """Tail the Blender log file and stream output to TUI"""
@@ -1188,11 +1596,16 @@ class BlenderTUIApp(App):
             total_combinations = len(configs)
             
             if total_combinations == 1:
-                self.write_message(f"✅ Configuration validated: {configs[0]}")
+                single = configs[0]
+                self.write_message(
+                    f"✅ Configuration validated: {single['fabric']} × {single['asset']} @ {single['view']}"
+                )
             else:
-                self.write_message(f"✅ Will render {total_combinations} fabric x asset combinations:")
+                self.write_message(f"✅ Will render {total_combinations} fabric × asset × view combinations:")
                 for i, config in enumerate(configs, 1):
-                    self.write_message(f"  {i}. {config['fabric']} × {config['asset']}")
+                    self.write_message(
+                        f"  {i}. {config['fabric']} × {config['asset']} @ {config['view']}"
+                    )
             
             self.write_message(f"🔧 DEBUG: Selected mode for render: '{self.selected_mode}'")
             
@@ -1227,27 +1640,17 @@ class BlenderTUIApp(App):
                 garment_name = config['garment']
                 fabric_name = config['fabric'].replace(".json", "").lower().replace(" ", "_")
                 
-                # Default asset suffix is name lowercased and underscored
-                asset_suffix = config['asset'].replace(" ", "_").lower()
-                
-                # Try to get real prefix and asset suffix from garment file
-                prefix = "garment"
-                try:
-                    g_path = GARMENTS_DIR / garment_name
-                    if g_path.exists():
-                        with open(g_path) as f:
-                            g_data = json.load(f)
-                            prefix = g_data.get("output_prefix", "garment")
-                            
-                            # Find the asset definition to get the correct suffix
-                            for asset_def in g_data.get("assets", []):
-                                if asset_def.get("name") == config['asset']:
-                                    # Found the asset, check for explicit suffix
-                                    if "suffix" in asset_def:
-                                        asset_suffix = asset_def["suffix"]
-                                    break
-                except:
-                    pass
+                asset_suffix = config.get('asset_suffix') or config['asset'].replace(" ", "_").lower()
+                prefix = config.get('view_output_prefix') or "garment"
+                if not config.get('view_output_prefix'):
+                    try:
+                        g_path = GARMENTS_DIR / garment_name
+                        if g_path.exists():
+                            with open(g_path) as f:
+                                g_data = json.load(f)
+                                prefix = g_data.get("output_prefix", "garment")
+                    except:
+                        pass
 
                 # Try to get real fabric suffix from fabric file
                 try:
@@ -1315,7 +1718,7 @@ class BlenderTUIApp(App):
                     self.write_message(f"🎉 Render completed: {output_path}")
             else:
                 # Multiple combinations - use batch rendering in single Blender process
-                self.write_message(f"🔧 Starting batch render of {total_combinations} fabric x asset combinations...")
+                self.write_message(f"🔧 Starting batch render of {total_combinations} fabric × asset × view combinations...")
                 
                 try:
                     # Start detached batch rendering
@@ -1360,16 +1763,18 @@ class BlenderTUIApp(App):
                             for render in successful_renders:
                                 fabric = render['fabric']
                                 asset = render['asset']
+                                view = render.get('view', 'default')
                                 output_path = render['output_path']
-                                self.write_message(f"  ✅ {fabric} × {asset}: {output_path}")
+                                self.write_message(f"  ✅ {fabric} × {asset} @ {view}: {output_path}")
                         
                         if failed_renders:
                             self.write_message(f"❌ {len(failed_renders)} renders failed:")
                             for render in failed_renders:
                                 fabric = render['fabric']
                                 asset = render['asset']
+                                view = render.get('view', 'default')
                                 error = render['error']
-                                self.write_message(f"  ❌ {fabric} × {asset}: {error}")
+                                self.write_message(f"  ❌ {fabric} × {asset} @ {view}: {error}")
                         
                         if not successful_renders and not failed_renders:
                             self.write_message("🛑 No renders completed")

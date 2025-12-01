@@ -29,6 +29,16 @@ def process_garment(data: Dict[str, Any], root: Path) -> bool:
         if new_val != data["blend_file"]:
             data["blend_file"] = new_val
             changed = True
+    views = data.get("views")
+    if isinstance(views, list):
+        for view in views:
+            if not isinstance(view, dict):
+                continue
+            if isinstance(view.get("blend_file"), str):
+                new_val = make_relative(view["blend_file"], root)
+                if new_val != view["blend_file"]:
+                    view["blend_file"] = new_val
+                    changed = True
     return changed
 
 

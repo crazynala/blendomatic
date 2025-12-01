@@ -38,6 +38,9 @@ class MockRenderSession:
         self.mode: Optional[str] = None
         self.render_settings: Optional[Dict] = None
         self.garment: Optional[Dict] = None
+        self.garment_views: List[Dict] = []
+        self.render_view: Optional[Dict] = None
+        self.render_view_code: Optional[str] = None
         self.fabric: Optional[Dict] = None
         self.asset: Optional[Dict] = None
         self.material: Optional[str] = None
@@ -106,18 +109,27 @@ class MockRenderSession:
         return {
             "mode": self.mode,
             "garment_name": self.garment.get("name") if self.garment else None,
-            "garment_prefix": self.garment.get("output_prefix", "mock") if self.garment else None,
+            "garment_prefix": self._active_view_prefix(),
+            "render_view": self.render_view_code,
             "fabric_name": self.fabric["name"] if self.fabric else None,
             "asset_name": self.asset["name"] if self.asset else None,
             "garment_loaded": self._garment_loaded,
             "fabric_applied": self._fabric_applied,
             "ready_to_render": self.is_ready_to_render()
         }
+
+    def _active_view_prefix(self) -> Optional[str]:
+        if self.render_view and self.render_view.get("output_prefix"):
+            return self.render_view.get("output_prefix")
+        if self.garment:
+            return self.garment.get("output_prefix", "mock")
+        return None
     
     def is_ready_to_render(self) -> bool:
         return all([
             self.mode,
             self.garment,
+            self.render_view,
             self.fabric,
             self.asset,
             self._garment_loaded,
@@ -145,6 +157,9 @@ class MockRenderSession:
             raise ValueError(f"Unknown garment '{garment_name}'. Available: {available}")
         
         self.garment = self._load_json(match)
+        self.garment_views = self._normalize_garment_views(self.garment)
+        self.render_view = None
+        self.render_view_code = None
         
         print(f"[DEMO] Loading garment blend file... (simulated)")
         time.sleep(1)  # Simulate blend file loading
@@ -153,8 +168,67 @@ class MockRenderSession:
         self.asset = None
         self._garment_loaded = True
         self._fabric_applied = False
+
+        # Activate default view immediately
+        self.set_render_view(None)
         
         print(f"[DEMO] Set garment: {self.garment.get('name', garment_name)}")
+
+    def _normalize_garment_views(self, garment: Dict) -> List[Dict]:
+        views: List[Dict] = []
+        fallback_blend = garment.get("blend_file")
+        fallback_prefix = garment.get("output_prefix") or garment.get("name") or "mock"
+        raw_views = garment.get("views")
+
+        if isinstance(raw_views, list) and raw_views:
+            for view in raw_views:
+                if not isinstance(view, dict):
+                    continue
+                code = (view.get("code") or "").strip()
+                blend_file = view.get("blend_file") or fallback_blend
+                output_prefix = view.get("output_prefix") or fallback_prefix
+                if not code or not blend_file:
+                    continue
+                views.append({
+                    "code": code,
+                    "blend_file": blend_file,
+                    "output_prefix": output_prefix
+                })
+
+        if not views and fallback_blend:
+            views.append({
+                "code": garment.get("default_view", "default"),
+                "blend_file": fallback_blend,
+                "output_prefix": fallback_prefix
+            })
+
+        return views
+
+    def set_render_view(self, view_code: Optional[str]) -> None:
+        if not self.garment:
+            raise RuntimeError("Select a garment before choosing a view")
+        if not self.garment_views:
+            self.garment_views = self._normalize_garment_views(self.garment)
+        if not self.garment_views:
+            raise RuntimeError("Garment has no views configured")
+
+        target = None
+        if view_code:
+            for view in self.garment_views:
+                if view.get("code") == view_code:
+                    target = view
+                    break
+            if not target:
+                valid = ", ".join(v.get("code", "?") for v in self.garment_views)
+                raise ValueError(f"Unknown view '{view_code}'. Available: {valid}")
+        else:
+            target = self.garment_views[0]
+
+        self.render_view = target
+        self.render_view_code = target.get("code")
+        self._garment_loaded = True
+        self.asset = None
+        self._fabric_applied = False
     
     def set_fabric(self, fabric_name: str) -> None:
         match = next((f for f in self.fabrics if f.name == fabric_name), None)
@@ -179,6 +253,12 @@ class MockRenderSession:
             available = ", ".join(self.list_assets())
             raise ValueError(f"Unknown asset '{asset_name}'. Available: {available}")
         
+        allowed_views = asset.get("render_views")
+        if allowed_views and self.render_view_code not in allowed_views:
+            raise ValueError(
+                f"Asset '{asset_name}' is not configured for view '{self.render_view_code}'"
+            )
+        
         self.asset = asset
         time.sleep(0.2)  # Simulate asset configuration
         print(f"[DEMO] Set asset: {asset_name}")
@@ -197,7 +277,7 @@ class MockRenderSession:
             raise RuntimeError(f"Missing components: {', '.join(missing)}")
         
         # Generate mock output path
-        garment_name = self.garment.get("output_prefix", "garment")
+        garment_name = self._active_view_prefix() or "garment"
         fabric_name = self.fabric.get("suffix", self.fabric["name"].lower().replace(" ", "_"))
         asset_suffix = self.asset.get("suffix", self.asset["name"].lower().replace(" ", "_"))
         

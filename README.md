@@ -104,6 +104,38 @@ The system uses the same JSON configuration files as before:
 - **`garments/*.json`** - Garment definitions with blend files and assets
 - **`fabrics/*.json`** - Fabric materials and textures
 
+### Garment Views
+
+- Each garment now declares a `views` array, and every view provides a `code`, `blend_file`, and `output_prefix`:
+
+```json
+{
+  "views": [
+    {
+      "code": "front",
+      "blend_file": "scenes/service_shirt_front.blend",
+      "output_prefix": "service_shirt_front"
+    },
+    {
+      "code": "detail",
+      "blend_file": "scenes/service_shirt_detail.blend",
+      "output_prefix": "service_shirt_detail"
+    }
+  ]
+}
+```
+
+- Assets can optionally include `render_views` to restrict which handles they render in. When omitted, assets render in every defined view.
+
+```json
+{
+  "name": "Band Collar Variant",
+  "render_views": ["front", "detail"]
+}
+```
+
+- Legacy `blend_file` / `output_prefix` fields are still read as a fallback, but new configs should prefer the `views` array.
+
 ### Portable Paths (Recommended)
 
 - Set a per-machine environment variable pointing to your project root:

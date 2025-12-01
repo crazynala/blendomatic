@@ -35,6 +35,9 @@ class RenderSession:
         self.mode: Optional[str] = None
         self.render_settings: Optional[Dict] = None
         self.garment: Optional[Dict] = None
+        self.garment_views: List[Dict] = []
+        self.render_view: Optional[Dict] = None
+        self.render_view_code: Optional[str] = None
         self.fabric: Optional[Dict] = None
         self.asset: Optional[Dict] = None
         self.material: Optional[Any] = None
@@ -97,19 +100,28 @@ class RenderSession:
         return {
             "mode": self.mode,
             "garment_name": self.garment.get("name") if self.garment else None,
-            "garment_prefix": self.garment.get("output_prefix") if self.garment else None,
+            "garment_prefix": self._get_active_view_prefix(),
+            "render_view": self.render_view_code,
             "fabric_name": self.fabric["name"] if self.fabric else None,
             "asset_name": self.asset["name"] if self.asset else None,
             "garment_loaded": self._garment_loaded,
             "fabric_applied": self._fabric_applied,
             "ready_to_render": self.is_ready_to_render()
         }
+
+    def _get_active_view_prefix(self) -> Optional[str]:
+        if self.render_view and self.render_view.get("output_prefix"):
+            return self.render_view.get("output_prefix")
+        if self.garment:
+            return self.garment.get("output_prefix")
+        return None
     
     def is_ready_to_render(self) -> bool:
         """Check if all required components are set for rendering"""
         return all([
             self.mode,
             self.garment,
+            self.render_view,
             self.fabric,
             self.asset,
             self.material,
@@ -153,45 +165,118 @@ class RenderSession:
         sys.stdout.flush()
     
     def set_garment(self, garment_name: str) -> None:
-        """Set garment and load its blend file"""
+        """Set garment configuration and select its default view"""
         match = next((g for g in self.garments if g.name == garment_name), None)
         if not match:
             available = ", ".join(self.list_garments())
             raise ValueError(f"Unknown garment '{garment_name}'. Available: {available}")
-        
-        self.garment = self._load_json(match)
-        
-        # Load blend file
-        blend_file = self.garment.get("blend_file")
-        blend_path = resolve_project_path(blend_file)
-        if not blend_path or not os.path.exists(blend_path):
-            raise FileNotFoundError(f"Garment blend file not found: {blend_file}")
 
-        # Avoid resetting Blender if the desired file is already open
+        self.garment = self._load_json(match)
+        self.garment_views = self._normalize_garment_views(self.garment)
+        if not self.garment_views:
+            raise ValueError(f"Garment '{garment_name}' has no valid views configured")
+
+        self.render_view = None
+        self.render_view_code = None
+        self._garment_loaded = False
+        self._fabric_applied = False
+        self.asset = None
+
+        # Load the default view immediately so the scene is ready
+        default_view_code = self.garment_views[0]["code"]
+        self.set_render_view(default_view_code)
+
+        print(f"[INFO] Set garment: {self.garment['name']} (view: {self.render_view_code})")
+
+    def _normalize_garment_views(self, garment: Dict) -> List[Dict]:
+        views: List[Dict] = []
+        raw_views = garment.get("views")
+
+        fallback_blend = garment.get("blend_file")
+        fallback_prefix = garment.get("output_prefix") or garment.get("name") or "garment"
+
+        if isinstance(raw_views, list) and raw_views:
+            for view in raw_views:
+                if not isinstance(view, dict):
+                    continue
+                code = (view.get("code") or "").strip()
+                blend_file = view.get("blend_file") or fallback_blend
+                output_prefix = view.get("output_prefix") or fallback_prefix
+                if not code or not blend_file:
+                    print(f"[WARN] Skipping invalid view definition on garment '{garment.get('name')}'")
+                    continue
+                views.append({
+                    "code": code,
+                    "blend_file": blend_file,
+                    "output_prefix": output_prefix
+                })
+
+        if not views and fallback_blend:
+            views.append({
+                "code": garment.get("default_view", "default"),
+                "blend_file": fallback_blend,
+                "output_prefix": fallback_prefix
+            })
+
+        return views
+
+    def set_render_view(self, view_code: Optional[str]) -> None:
+        if not self.garment:
+            raise RuntimeError("Set a garment before selecting a render view")
+        if not self.garment_views:
+            self.garment_views = self._normalize_garment_views(self.garment)
+        if not self.garment_views:
+            raise RuntimeError("Garment has no configured views")
+
+        target_view: Optional[Dict] = None
+        if view_code:
+            for view in self.garment_views:
+                if view.get("code") == view_code:
+                    target_view = view
+                    break
+            if not target_view:
+                valid_codes = ", ".join(v.get("code", "?") for v in self.garment_views)
+                raise ValueError(f"Unknown view '{view_code}'. Available views: {valid_codes}")
+        else:
+            target_view = self.garment_views[0]
+            view_code = target_view.get("code")
+
+        if not target_view:
+            raise RuntimeError("Failed to resolve render view")
+
+        view_already_active = self.render_view_code == view_code and self._garment_loaded
+
+        blend_path = resolve_project_path(target_view.get("blend_file"))
+        if not blend_path or not os.path.exists(blend_path):
+            raise FileNotFoundError(f"Blend file for view '{view_code}' not found: {target_view.get('blend_file')}")
+
+        need_reload = True
         try:
             current_file = bpy.data.filepath
             if current_file and os.path.exists(current_file):
                 try:
-                    same = os.path.samefile(current_file, str(blend_path))
+                    need_reload = not os.path.samefile(current_file, str(blend_path))
                 except Exception:
-                    same = (Path(current_file).resolve() == Path(blend_path).resolve())
-            else:
-                same = False
+                    need_reload = (Path(current_file).resolve() != Path(blend_path).resolve())
         except Exception:
-            same = False
+            need_reload = True
 
-        if same:
-            print(f"[INFO] Garment blend already open: {blend_path}")
-        else:
-            print(f"[INFO] Loading garment blend file: {blend_path}")
+        if need_reload:
+            print(f"[INFO] Loading view '{view_code}' blend file: {blend_path}")
             bpy.ops.wm.open_mainfile(filepath=str(blend_path))
-        
-        # Reset dependent state
-        self.asset = None
+        elif view_already_active:
+            print(f"[INFO] Render view '{view_code}' already active; reusing loaded scene")
+        else:
+            print(f"[INFO] Blend file already loaded for view '{view_code}': {blend_path}")
+
+        self.render_view = target_view
+        self.render_view_code = view_code
         self._garment_loaded = True
-        self._fabric_applied = False
-        
-        print(f"[INFO] Set garment: {self.garment['name']}")
+
+        if not view_already_active:
+            self.asset = None
+            self.material = None
+            self._fabric_applied = False
     
     def set_fabric(self, fabric_name: str) -> None:
         """Set fabric and update existing materials"""
@@ -260,6 +345,15 @@ class RenderSession:
             raise ValueError(f"Unknown asset '{asset_name}'. Available: {available}")
         
         self.asset = asset
+
+        allowed_views = asset.get("render_views")
+        if allowed_views:
+            if not self.render_view_code:
+                raise RuntimeError("Render view must be selected before setting asset with view constraints")
+            if self.render_view_code not in allowed_views:
+                raise ValueError(
+                    f"Asset '{asset_name}' is not configured for view '{self.render_view_code}'. Allowed views: {', '.join(allowed_views)}"
+                )
         self._configure_asset(self.asset)
         print(f"[INFO] Set asset: {asset_name}")
     
@@ -297,8 +391,11 @@ class RenderSession:
             
             raise RuntimeError(f"Missing components: {', '.join(missing)}")
         
-        # Generate output path renders/[mode]/[date]/[garment]
-        garment_name = self.garment.get("output_prefix", "garment")
+        if not self.render_view:
+            raise RuntimeError("Render view not selected")
+
+        # Generate output path renders/[mode]/[date]/[view_prefix]
+        garment_name = self._get_active_view_prefix() or "garment"
         fabric_name = self.fabric.get("suffix", self.fabric["name"].lower().replace(" ", "_"))
         asset_suffix = self.asset.get("suffix", self.asset["name"].lower().replace(" ", "_"))
 
@@ -328,8 +425,10 @@ class RenderSession:
             
             # Optionally save debug scene before rendering
             if self.save_debug_files:
-                DEBUG_DIR.mkdir(exist_ok=True)
-                debug_path = DEBUG_DIR / f"debug_scene_{fabric_name}_{asset_suffix}.blend"
+                mode_folder = self.mode or "default"
+                debug_dir = DEBUG_DIR / mode_folder / date_folder
+                debug_dir.mkdir(parents=True, exist_ok=True)
+                debug_path = debug_dir / f"debug_scene_{fabric_name}_{asset_suffix}.blend"
                 bpy.ops.wm.save_mainfile(filepath=str(debug_path))
                 print(f"[DEBUG] Saved debug scene to {debug_path}")
             

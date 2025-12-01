@@ -54,13 +54,15 @@ class BlenderBridge:
         self.result_file = self.temp_dir / "result.json"
         self.script_file = self.temp_dir / "blender_script.py"
         
-        # Create logs directory in project root
+        # Create logs directory in project root (with date subfolders)
         self.project_root = Path(__file__).parent.resolve()
-        self.logs_dir = self.project_root / "logs"
-        self.logs_dir.mkdir(exist_ok=True)
-        
-        # Create timestamped log file in logs directory
+        self.logs_root = self.project_root / "logs"
         import datetime
+        date_stamp = datetime.datetime.now().strftime("%Y-%m-%d")
+        self.logs_dir = self.logs_root / date_stamp
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create timestamped log file in dated logs directory
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         self.log_file = self.logs_dir / f"blender_{timestamp}.log"
         
@@ -189,6 +191,13 @@ try:
             print(f"[RENDER_CONFIG] � Setting garment: {config_data['garment']}", flush=True)
             session.set_garment(config_data['garment'])
             print(f"[RENDER_CONFIG] ✅ Garment '{config_data['garment']}' loaded", flush=True)
+            view_handle = config_data.get('view')
+            if view_handle:
+                print(f"[RENDER_CONFIG] 👁 Setting view: {view_handle}", flush=True)
+            else:
+                print(f"[RENDER_CONFIG] 👁 Using default garment view", flush=True)
+            session.set_render_view(view_handle)
+            print(f"[RENDER_CONFIG] ✅ View active", flush=True)
             
             print(f"[RENDER_CONFIG] 🧵 Setting fabric: {config_data['fabric']}", flush=True)
             session.set_fabric(config_data['fabric'])
@@ -238,12 +247,16 @@ try:
             
             for i, config_data in enumerate(configs, 1):
                 try:
-                    log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] Starting: {config_data['fabric']} × {config_data['asset']}")
+                    view_label = config_data.get('view') or 'default'
+                    log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] Starting: {config_data['fabric']} × {config_data['asset']} @ {view_label}")
                     
                     # Load garment (only needed for first render if same garment)
                     if i == 1 or config_data['garment'] != configs[i-2]['garment']:
                         log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] Loading garment: {config_data['garment']}")
                         session.set_garment(config_data['garment'])
+                    # Always ensure correct view is active
+                    log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] Setting view: {view_label}")
+                    session.set_render_view(config_data.get('view'))
                     
                     # Apply fabric
                     log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] Applying fabric: {config_data['fabric']}")
@@ -271,6 +284,7 @@ try:
                     successful_renders.append({
                         'fabric': config_data['fabric'],
                         'asset': config_data['asset'],
+                        'view': config_data.get('view'),
                         'output_path': output_path
                     })
                     log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] ✅ Completed: {output_path}")
@@ -280,6 +294,7 @@ try:
                     failed_renders.append({
                         'fabric': config_data['fabric'],
                         'asset': config_data['asset'],
+                        'view': config_data.get('view'),
                         'error': error_msg
                     })
                     log_and_print(f"[MULTI_RENDER] [{i}/{total_configs}] ❌ Failed: {error_msg}")
@@ -503,12 +518,15 @@ except Exception as e:
         """Return a resolved .blend file path to open before running the script, if applicable."""
         try:
             garment_file = None
+            view_code = None
             if command == 'render_with_config':
                 garment_file = args.get('garment')
+                view_code = args.get('view')
             elif command == 'render_multiple_configs':
                 configs = args.get('configs') or []
                 if configs:
                     garment_file = configs[0].get('garment')
+                    view_code = configs[0].get('view')
             if not garment_file or _GARMENTS_DIR is None:
                 return None
             garment_json = _GARMENTS_DIR / garment_file
@@ -517,7 +535,8 @@ except Exception as e:
                 return None
             with open(garment_json, 'r') as f:
                 data = _json_helper.load(f)
-            blend_rel = data.get('blend_file')
+            selected_view = self._select_garment_view(data, view_code)
+            blend_rel = selected_view.get('blend_file') if selected_view else data.get('blend_file')
             if not blend_rel:
                 print(f"[BLEND_FILE] No 'blend_file' key in {garment_json}")
                 return None
@@ -547,6 +566,46 @@ except Exception as e:
         except Exception as e:
             print(f"[BLEND_FILE] Exception resolving blend file: {e}")
             return None
+
+    def _normalize_garment_views(self, garment_data: Dict) -> List[Dict]:
+        views: List[Dict] = []
+        fallback_blend = garment_data.get('blend_file')
+        fallback_prefix = garment_data.get('output_prefix') or garment_data.get('name') or 'garment'
+        raw_views = garment_data.get('views')
+
+        if isinstance(raw_views, list) and raw_views:
+            for view in raw_views:
+                if not isinstance(view, dict):
+                    continue
+                code = (view.get('code') or '').strip()
+                blend_file = view.get('blend_file') or fallback_blend
+                output_prefix = view.get('output_prefix') or fallback_prefix
+                if not code or not blend_file:
+                    continue
+                views.append({
+                    'code': code,
+                    'blend_file': blend_file,
+                    'output_prefix': output_prefix
+                })
+
+        if not views and fallback_blend:
+            views.append({
+                'code': garment_data.get('default_view', 'default'),
+                'blend_file': fallback_blend,
+                'output_prefix': fallback_prefix
+            })
+
+        return views
+
+    def _select_garment_view(self, garment_data: Dict, view_code: Optional[str]) -> Optional[Dict]:
+        views = self._normalize_garment_views(garment_data)
+        if not views:
+            return None
+        if view_code:
+            for view in views:
+                if view.get('code') == view_code:
+                    return view
+        return views[0]
     
     def cancel_render(self) -> Dict:
         """Cancel the currently running render process"""
