@@ -7,11 +7,8 @@ __pycache__/
 
 # Render output files
 renders/
-
-# Log files
+runs/
 logs/
-
-# Debug files
 debug/
 
 # C extensions
