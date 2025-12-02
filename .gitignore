@@ -10,7 +10,6 @@ renders/
 runs/
 logs/
 debug/
-worker/
 
 # C extensions
 *.so
