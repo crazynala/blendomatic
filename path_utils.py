@@ -5,6 +5,9 @@ from typing import Optional, Union
 
 CODE_ROOT_ENV = "BLENDOMATIC_ROOT"           # Root of this code repo (preferred)
 ASSETS_ROOT_ENV = "BLENDER_PROJECT_ROOT"     # Root for Blender .blend and image assets
+RENDER_CONFIG_OVERRIDE_ENV = "BLENDOMATIC_RENDER_CONFIG"
+GARMENTS_OVERRIDE_ENV = "BLENDOMATIC_GARMENTS_DIR"
+FABRICS_OVERRIDE_ENV = "BLENDOMATIC_FABRICS_DIR"
 
 
 def _env_path(var: str) -> Optional[Path]:
@@ -77,6 +80,7 @@ GARMENTS_DIR: Path
 FABRICS_DIR: Path
 RENDERS_DIR: Path
 DEBUG_DIR: Path
+RUNS_DIR: Path
 
 def _simple_load_dotenv(dotenv_path: Path):
     """Lightweight .env loader (key=value) used if python-dotenv isn't invoked earlier."""
@@ -103,14 +107,20 @@ def refresh_roots():
     Call this after loading .env so BLENDER_PROJECT_ROOT is respected.
     """
     global CODE_ROOT, ASSETS_ROOT
-    global RENDER_CONFIG_PATH, GARMENTS_DIR, FABRICS_DIR, RENDERS_DIR, DEBUG_DIR
+    global RENDER_CONFIG_PATH, GARMENTS_DIR, FABRICS_DIR, RENDERS_DIR, DEBUG_DIR, RUNS_DIR
     CODE_ROOT = get_code_root()
     ASSETS_ROOT = get_assets_root()
-    RENDER_CONFIG_PATH = CODE_ROOT / "render_config.json"
-    GARMENTS_DIR = CODE_ROOT / "garments"
-    FABRICS_DIR = CODE_ROOT / "fabrics"
+
+    render_config_override = _env_path(RENDER_CONFIG_OVERRIDE_ENV)
+    garments_override = _env_path(GARMENTS_OVERRIDE_ENV)
+    fabrics_override = _env_path(FABRICS_OVERRIDE_ENV)
+
+    RENDER_CONFIG_PATH = render_config_override or (CODE_ROOT / "render_config.json")
+    GARMENTS_DIR = garments_override or (CODE_ROOT / "garments")
+    FABRICS_DIR = fabrics_override or (CODE_ROOT / "fabrics")
     RENDERS_DIR = CODE_ROOT / "renders"
     DEBUG_DIR = CODE_ROOT / "debug"
+    RUNS_DIR = CODE_ROOT / "runs"
 
 # Attempt lightweight .env load BEFORE initial root computation
 _simple_load_dotenv(Path(__file__).resolve().parent / '.env')

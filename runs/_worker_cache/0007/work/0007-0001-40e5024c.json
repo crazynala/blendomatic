@@ -1,0 +1,15 @@
+{
+  "job_id": "0007-0001-40e5024c",
+  "run_id": "0007",
+  "config": {
+    "command": "render_with_config",
+    "args": {
+      "mode": "fast",
+      "garment": "service_shirt_f.json",
+      "fabric": "gul_mustard.json",
+      "asset": "Band Collar Variant",
+      "view": "default",
+      "save_debug_files": false
+    }
+  }
+}

@@ -6,6 +6,7 @@ import bpy
 import json
 import os
 import math
+import datetime as _dt
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 
@@ -51,6 +52,10 @@ class RenderSession:
         self._fabric_applied = False
         self.save_debug_files: bool = True
         self.enable_debug_logging: bool = False
+
+        # Track when this session began so renders share a consistent date folder
+        self._batch_started_at = _dt.datetime.now()
+        self._batch_date_folder = self._batch_started_at.strftime("%Y-%m-%d")
     
     # ---------------------------------------------------------
     # Utility Methods
@@ -106,8 +111,13 @@ class RenderSession:
             "asset_name": self.asset["name"] if self.asset else None,
             "garment_loaded": self._garment_loaded,
             "fabric_applied": self._fabric_applied,
-            "ready_to_render": self.is_ready_to_render()
+            "ready_to_render": self.is_ready_to_render(),
+            "batch_date": self._batch_date_folder,
         }
+
+    def get_batch_date_folder(self) -> str:
+        """Return the date folder captured when the session/batch started."""
+        return self._batch_date_folder
 
     def _get_active_view_prefix(self) -> Optional[str]:
         if self.render_view and self.render_view.get("output_prefix"):
@@ -414,8 +424,7 @@ class RenderSession:
         fabric_name = self.fabric.get("suffix", self.fabric["name"].lower().replace(" ", "_"))
         asset_suffix = self.asset.get("suffix", self.asset["name"].lower().replace(" ", "_"))
 
-        import datetime as _dt
-        date_folder = _dt.datetime.now().strftime("%Y-%m-%d")
+        date_folder = self.get_batch_date_folder()
 
         # Ensure mode is set; fallback to 'default' if missing
         mode_name = self.mode or "default"

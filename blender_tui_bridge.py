@@ -3,7 +3,10 @@
 Blender TUI Bridge
 This script runs OUTSIDE Blender and communicates with Blender via subprocess
 This allows us to have a proper TUI while still controlling Blender
+
+Also supports a headless worker mode via CLI arguments.
 """
+import argparse
 import subprocess
 import json
 import tempfile
@@ -11,7 +14,7 @@ import os
 import sys
 import signal
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import time
 import json as _json_helper
 
@@ -41,6 +44,19 @@ except Exception as _e:
     _GARMENTS_DIR = None
     def _resolve_project_path(p):
         return Path(p) if p else None
+
+# Worker registry integration (optional during local dev)
+try:
+    from worker_registry import (
+        get_worker_id as _get_worker_id,
+        record_heartbeat as _record_heartbeat,
+        get_worker_mode as _get_worker_mode,
+    )
+except Exception as _worker_exc:  # pragma: no cover - keep CLI usable without registry
+    _get_worker_id = None
+    _record_heartbeat = None
+    _get_worker_mode = None
+    print(f"[WORKER] worker_registry import failed: {_worker_exc}", flush=True)
 
 class BlenderBridge:
     """
@@ -836,35 +852,131 @@ class BlenderTUISession:
         self.bridge.cleanup()
 
 
-def main():
-    """Test the Blender bridge"""
-    print("🔗 BLENDER TUI BRIDGE TEST")
-    print("=" * 50)
-    
-    # Find Blender
-    blender_exe = "blender"  # Assume it's in PATH
-    
+def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Blendomatic Blender bridge CLI")
+    parser.add_argument("--blender", dest="blender_exe", default="blender", help="Path to Blender executable")
+    parser.add_argument("--job", dest="job_file", help="Path to job JSON file", default=None)
+    parser.add_argument("--config", dest="config_file", help="Explicit config JSON (overrides job)", default=None)
+    parser.add_argument("--output", dest="output_file", help="Where to write result JSON", default=None)
+    parser.add_argument("--test", action="store_true", help="Run connection test instead of a render job")
+    return parser.parse_args(argv)
+
+
+def _load_json_file(path: Path) -> Dict[str, Any]:
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _run_job(job_path: Path, blender_exe: str, output_path: Optional[Path] = None) -> int:
+    job_data = _load_json_file(job_path)
+    config = job_data.get("config", job_data)
+
+    args = config.get("args", {})
+    command = config.get("command", "render_with_config")
+    job_id = job_data.get("job_id")
+    run_id = job_data.get("run_id")
+
+    worker_id = _get_worker_id() if _get_worker_id else None
+    worker_mode = _get_worker_mode() if _get_worker_mode else None
+
+    def _heartbeat(status: str, info: Optional[Dict[str, Any]] = None, active: bool = True) -> None:
+        if not worker_id or _record_heartbeat is None:
+            return
+        try:
+            _record_heartbeat(
+                worker_id,
+                status=status,
+                active_job_id=job_id if active else None,
+                run_id=run_id,
+                info=info,
+                mode=worker_mode,
+            )
+        except Exception as exc:  # pragma: no cover - best effort logging
+            print(f"[WORKER] Heartbeat failed: {exc}", flush=True)
+
+    session = BlenderTUISession(blender_exe)
+    _heartbeat(
+        "busy",
+        info={
+            "job_id": job_id,
+            "command": command,
+            "args_summary": list(args.keys()),
+        },
+    )
+
+    result: Dict[str, Any]
+    final_info: Dict[str, Any] = {}
     try:
-        session = BlenderTUISession(blender_exe)
-        
-        print("Testing bridge connection...")
-        modes = session.list_modes()
-        print(f"Available modes: {modes}")
-        
-        garments = session.list_garments()
-        print(f"Available garments: {garments}")
-        
-        state = session.get_state()
-        print(f"Current state: {state}")
-        
-        print("✅ Bridge test successful!")
-        
-        # Clean up
+        if command == "render_with_config":
+            result = session.render_with_config_sync(args)
+        else:
+            # Direct bridge access for advanced commands
+            result = session.bridge.execute_command(command, args)
+        final_info = {
+            "job_id": job_id,
+            "last_result": result,
+        }
+    except Exception as exc:
+        final_info = {
+            "job_id": job_id,
+            "last_result": {
+                "success": False,
+                "error": str(exc),
+            },
+        }
+        _heartbeat("idle", info=final_info, active=False)
+        raise
+    finally:
         session.cleanup()
-        
-    except Exception as e:
-        print(f"❌ Bridge test failed: {e}")
+
+    if output_path:
+        output = {
+            "job_id": job_id,
+            "run_id": run_id,
+            "result": result,
+        }
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(output, indent=2))
+
+    success = result.get("success", False)
+    final_info.setdefault("last_result", {})
+    final_info["last_result"].setdefault("success", success)
+    final_info["last_result"].setdefault("error", result.get("error"))
+    _heartbeat("idle", info=final_info, active=False)
+
+    return 0 if success else 1
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = _parse_args(argv)
+
+    if args.test and not args.job_file and not args.config_file:
+        try:
+            session = BlenderTUISession(args.blender_exe)
+            modes = session.list_modes()
+            print(f"✅ Bridge test successful. Modes: {modes}")
+            session.cleanup()
+            return 0
+        except Exception as exc:
+            print(f"❌ Bridge test failed: {exc}")
+            return 1
+
+    job_path: Optional[Path] = None
+    if args.config_file:
+        job_path = Path(args.config_file)
+    elif args.job_file:
+        job_path = Path(args.job_file)
+    else:
+        print("❌ No job or config file specified")
+        return 1
+
+    if not job_path.exists():
+        print(f"❌ Job file not found: {job_path}")
+        return 1
+
+    output_path = Path(args.output_file) if args.output_file else None
+    return _run_job(job_path, args.blender_exe, output_path)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

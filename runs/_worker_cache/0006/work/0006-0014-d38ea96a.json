@@ -1,0 +1,15 @@
+{
+  "job_id": "0006-0014-d38ea96a",
+  "run_id": "0006",
+  "config": {
+    "command": "render_with_config",
+    "args": {
+      "mode": "fast",
+      "garment": "service_shirt_f.json",
+      "fabric": "navy_royal_oxford.json",
+      "asset": "Regular Collar Variant",
+      "view": "default",
+      "save_debug_files": false
+    }
+  }
+}

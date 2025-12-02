@@ -4,17 +4,49 @@ This version avoids all conflicts with Textual's internal log property
 """
 import asyncio
 import json
+import os
 import signal
 import sys
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
+from datetime import datetime, timezone
 
 try:
     from textual.app import App, ComposeResult
     from textual.containers import Container, Horizontal, Vertical
     from textual.widgets import Header, Footer, Static, Button, SelectionList, Label, Log, Checkbox, Input
     from textual.screen import Screen
-    from textual import on
+    from textual import on, work
+    from rich.cells import cell_len
+
+    # Textual 0.58+ removed NoActiveAppError from textual.errors; fall back to the new module.
+    try:
+        from textual.errors import NoActiveAppError  # type: ignore
+    except ImportError:
+        try:
+            from textual._context import NoActiveAppError  # type: ignore
+        except ImportError:
+            class NoActiveAppError(Exception):  # pragma: no cover
+                pass
+
+    class SafeLog(Log):
+        """Log widget that tolerates shutdown races when updating width."""
+
+        @work(thread=True)
+        def _update_size(self, updates: int, lines: List[str]) -> None:  # type: ignore[override]
+            if not lines:
+                return
+            _process_line = self._process_line
+            max_length = max(cell_len(_process_line(line)) for line in lines)
+            try:
+                app = self.app
+            except (NoActiveAppError, LookupError):
+                return
+            try:
+                app.call_from_thread(self._update_maximum_width, updates, max_length)
+            except (NoActiveAppError, LookupError):
+                return
+
     TEXTUAL_AVAILABLE = True
 except ImportError:
     TEXTUAL_AVAILABLE = False
@@ -32,13 +64,31 @@ except ImportError:
         SelectionHighlighted = object()
     class Label: pass
     class Log: pass
+    class SafeLog(Log):
+        pass
     class Checkbox: pass
     class Input: pass
+    class NoActiveAppError(Exception):
+        pass
     
     def on(*args, **kwargs):
         def decorator(func):
             return func
         return decorator
+
+    def work(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+# Load .env before importing project modules so worker env vars are available
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _env_path = Path(__file__).parent / ".env"
+    _load_dotenv(dotenv_path=_env_path, override=False)
+    print(f"[ENV][TUI] Loaded .env from {_env_path} (exists={_env_path.exists()})", flush=True)
+except Exception as _env_exc:
+    print(f"[ENV][TUI] .env load skipped: {_env_exc}", flush=True)
 
 # Path handling centralized
 from path_utils import (
@@ -48,9 +98,27 @@ from path_utils import (
 )
 
 from blender_tui_bridge import BlenderTUISession
+from worker.runner import WorkerRunner, build_run_store
 import sys
 from render_state import RenderRunState, BlenderLogParser, AssetStatus
 from execution_screen import ExecutionScreen
+from run_manager import RunContext, create_run_record
+from job_manager import expand_configs_to_jobs, save_job_records
+
+try:
+    from worker_registry import (
+        list_workers as _list_workers,
+        record_heartbeat as _record_worker_heartbeat,
+        get_worker_id as _get_worker_id,
+        get_worker_mode as _get_worker_mode,
+        set_log_sink as _set_worker_log_sink,
+    )
+except Exception:
+    _list_workers = None
+    _record_worker_heartbeat = None
+    _get_worker_id = None
+    _get_worker_mode = None
+    _set_worker_log_sink = None
 
 # Modal Screen Classes must be defined before use
 if TEXTUAL_AVAILABLE:
@@ -269,6 +337,7 @@ else:
     JsonErrorModal = None  # type: ignore
     JsonErrorsModal = None  # type: ignore
 
+
 class BlenderTUIApp(App):
     """
     Textual TUI that communicates with Blender via bridge
@@ -299,8 +368,9 @@ class BlenderTUIApp(App):
     .controls_row {
         height: 4;
         margin: 0 0 0 0;
-        padding: 0;
+        padding: 0 1;
         border-top: solid white;
+        align: center middle;
     }
     
     .timeout_config {
@@ -316,6 +386,26 @@ class BlenderTUIApp(App):
         padding: 1;
         border-top: solid white;
         overflow: hidden;
+    }
+
+    .workers_panel {
+        dock: bottom;
+        height: 20%;
+        margin: 0 1 1 1;
+        padding: 1;
+        border-top: solid $primary;
+    }
+
+    #worker_title {
+        height: 1;
+        content-align: center middle;
+    }
+
+    #child_status_banner {
+        padding: 0 1;
+        background: $warning-darken-2;
+        color: black;
+        margin-bottom: 1;
     }
     
     Log {
@@ -357,13 +447,14 @@ class BlenderTUIApp(App):
     }
     
     Input {
-        height: 1;
+        height: 3;
+        min-height: 3;
         margin: 0 0 1 0;
         width: 10;
     }
-    
+
     Checkbox {
-        margin: 0 0 1 0;
+        margin: 0 1 0 0;
     }
 
     /* Modal styling for JSON error */
@@ -500,6 +591,17 @@ class BlenderTUIApp(App):
         self.save_debug_checkbox: Optional[Checkbox] = None
         self.render_button: Optional[Button] = None
         self.cancel_button: Optional[Button] = None
+        self.record_run_checkbox: Optional[Checkbox] = None
+        self.child_mode_checkbox: Optional[Checkbox] = None
+        self.child_status_banner: Optional[Label] = None
+        self.worker_status_display: Optional[Log] = None
+        self.worker_poll_task: Optional[asyncio.Task] = None
+        self.worker_listing_enabled: bool = False
+        self.worker_runner: Optional[WorkerRunner] = None
+        self.worker_runner_task: Optional[asyncio.Task] = None
+        self.worker_runner_store: Optional[str] = None
+        self._child_status_text: str = "🧒 Client mode idle - waiting for jobs"
+        self._is_shutting_down: bool = False
         
         # Local data caches
         self.garment_data: Dict[str, Any] = {}
@@ -514,6 +616,7 @@ class BlenderTUIApp(App):
         
         # Debug files configuration
         self.save_debug_files: bool = False
+        self.record_run_enabled: bool = True
         
         # Rendering state
         self.is_rendering: bool = False
@@ -542,6 +645,18 @@ class BlenderTUIApp(App):
         # Execution state
         self.render_state = RenderRunState()
         self.log_parser = BlenderLogParser(self.render_state)
+        self.current_run: Optional[RunContext] = None
+        self.node_mode: str = "child"
+        self.worker_id: Optional[str] = _get_worker_id() if _get_worker_id else None
+        self.worker_mode: str = _get_worker_mode("child") if _get_worker_mode else "child"
+        self.heartbeat_task: Optional[asyncio.Task] = None
+        self._worker_log_sink_active = False
+        if _set_worker_log_sink is not None:
+            try:
+                _set_worker_log_sink(self._handle_worker_registry_log)
+                self._worker_log_sink_active = True
+            except Exception as sink_exc:
+                print(f"[TUI] Failed to attach worker log sink: {sink_exc}", flush=True)
     
     def _load_json_file(self, file_path: Path) -> Dict[str, Any]:
         """Load a JSON file safely"""
@@ -994,27 +1109,47 @@ class BlenderTUIApp(App):
             
             # Bottom section: Render controls
             with Horizontal(classes="controls_row"):
-                # Save debug files toggle near render button
-                self.save_debug_checkbox = Checkbox("Save debug files", value=False, id="save_debug_checkbox")
-                yield self.save_debug_checkbox
-                
-                self.render_button = Button("🎬 RENDER", id="render_btn", variant="success", flat=True)
-                yield self.render_button
-                self.cancel_button = Button("❌ CANCEL", id="cancel_btn", variant="error")
-                self.cancel_button.display = False  # Hidden by default
-                yield self.cancel_button
+                    self.render_button = Button("🎬 RENDER", id="render_btn", variant="success", flat=True)
+                    yield self.render_button
+
+                    self.child_mode_checkbox = Checkbox("Client mode", value=True, id="child_mode_checkbox")
+                    try:
+                        self.child_mode_checkbox.tooltip = "Toggle to let this node process queued runs"
+                    except Exception:
+                        pass
+                    yield self.child_mode_checkbox
+
+                    self.save_debug_checkbox = Checkbox("Save debug files", value=False, id="save_debug_checkbox")
+                    yield self.save_debug_checkbox
+
+                    self.record_run_checkbox = Checkbox("Record run", value=True, id="record_run_checkbox")
+                    yield self.record_run_checkbox
+
+                    self.cancel_button = Button("❌ CANCEL", id="cancel_btn", variant="error")
+                    self.cancel_button.display = False  # Hidden by default
+                    yield self.cancel_button
             
             # Message panel
             with Container(classes="message_panel"):
                 yield Static("📄 Messages & Blender Output", id="message_title")
-                self.message_display = Log(auto_scroll=True)
+                self.child_status_banner = Label("", id="child_status_banner")
+                self.child_status_banner.display = False
+                yield self.child_status_banner
+                self.message_display = SafeLog(auto_scroll=True)
                 yield self.message_display
+
+            with Container(classes="workers_panel"):
+                yield Static("🖥 Connected Workers", id="worker_title")
+                self.worker_status_display = SafeLog(auto_scroll=False, id="worker_log")
+                yield self.worker_status_display
         
         yield Footer()
     
     async def on_mount(self):
         """Initialize the session when app starts"""
         self.write_message("🚀 Initializing Blender TUI...")
+        self._update_record_run_controls()
+        self._update_node_mode_ui()
         # Log Textual version and consolidated modal support for diagnostics
         try:
             import textual  # type: ignore
@@ -1059,15 +1194,66 @@ class BlenderTUIApp(App):
             self.write_message(f"⚠️ Initial JSON scan failed: {e}")
 
         self.write_message("✅ TUI ready - click on items to select them")
+        if self.worker_id:
+            self.write_message(f"🪪 Worker ID: {self.worker_id}")
+        else:
+            self.write_message("⚠️ Worker ID unavailable; heartbeats disabled")
+
+        if self.worker_listing_enabled and self.worker_poll_task is None:
+            try:
+                self.worker_poll_task = asyncio.create_task(self._worker_poll_loop())
+            except Exception as exc:
+                self.write_message(f"⚠️ Worker polling unavailable: {exc}")
+
+        if self.heartbeat_task is None and _record_worker_heartbeat is not None:
+            try:
+                self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+            except Exception as exc:
+                self.write_message(f"⚠️ Worker heartbeat unavailable: {exc}")
+
+        await self._ensure_worker_runner()
+
+    async def on_shutdown(self) -> None:
+        """Mark shutdown so background log writes don't touch dead widgets."""
+        self._is_shutting_down = True
+        try:
+            await super().on_shutdown()
+        except AttributeError:
+            pass
     
     def write_message(self, message: str):
         """Write message to the message display (avoiding 'log' method name)"""
-        if self.message_display:
-            self.message_display.write_line(message)
+        if not self._is_shutting_down and self.message_display:
+            try:
+                self.message_display.write_line(message)
+            except NoActiveAppError:
+                self._is_shutting_down = True
+            except Exception:
+                pass
         # Also use Textual's built-in logging properly
-        if hasattr(self, 'log') and hasattr(self.log, 'info'):
-            self.log.info(message)
-        print(message)  # Also print to console for debugging
+        if not self._is_shutting_down and hasattr(self, 'log') and hasattr(self.log, 'info'):
+            try:
+                self.log.info(message)
+            except NoActiveAppError:
+                self._is_shutting_down = True
+            except Exception:
+                pass
+        print(message, flush=True)
+
+    def _handle_worker_registry_log(self, message: str) -> None:
+        """Route worker registry debug logs into the TUI panels."""
+        formatted = f"🛰 {message}"
+        try:
+            self.write_message(formatted)
+        except Exception:
+            print(formatted, flush=True)
+        if self.worker_status_display and not self._is_shutting_down:
+            try:
+                self.worker_status_display.write_line(formatted)
+            except NoActiveAppError:
+                self._is_shutting_down = True
+            except Exception:
+                pass
 
     # -------------------------------------------------
     # JSON Error Modal Handling
@@ -1459,11 +1645,23 @@ class BlenderTUIApp(App):
     
     async def on_checkbox_changed(self, event):
         """Handle checkbox changes"""
+        if getattr(event.checkbox, "disabled", False):
+            return
         if event.checkbox is self.save_debug_checkbox:
             self.save_debug_files = event.value
             await self.update_local_status()
         elif event.checkbox is self.toggle_all_checkbox:
             await self._apply_toggle_all(event.value)
+        elif event.checkbox is self.record_run_checkbox:
+            self._update_record_run_controls()
+        elif event.checkbox is self.child_mode_checkbox:
+            if self.is_rendering:
+                self.write_message("⚠️ Cannot change node mode while a render is running")
+                event.checkbox.value = (self.node_mode == "child")
+                return
+            self.node_mode = "child" if event.value else "master"
+            self._update_node_mode_ui()
+            await self._ensure_worker_runner()
     
     async def update_local_status(self):
         """Update message log with current configuration status"""
@@ -1495,7 +1693,276 @@ class BlenderTUIApp(App):
             f"🔧 Mode: {self.selected_mode or 'Not selected'} | 👔 Garment: {garment_label} | "
             f"🧵 Fabrics: {fabric_status} | 👁 Views: {view_status} | 🎨 Assets: {asset_status}{combo_status} | 🐞 Debug: {debug_status} | Status: {status}"
         )
+
+    def _reset_render_state(self) -> None:
+        """Shared helper to reset render-related UI state."""
+        self.is_rendering = False
+        if getattr(self, "render_button", None):
+            self.render_button.display = True
+        if getattr(self, "cancel_button", None):
+            self.cancel_button.display = False
+        self.current_render_task = None
+        self.current_log_task = None
+        self.render_pid = None
+        try:
+            self.refresh()
+        except Exception:
+            pass
+
+    def _update_record_run_controls(self) -> None:
+        enabled = True
+        if self.record_run_checkbox is not None:
+            enabled = bool(self.record_run_checkbox.value)
+        self.record_run_enabled = enabled
+
+    def _refresh_child_status_banner(self) -> None:
+        if self.child_status_banner is None:
+            return
+        if self.node_mode == "child":
+            self.child_status_banner.display = True
+            self.child_status_banner.update(self._child_status_text or "🧒 Client mode idle - waiting for jobs")
+        else:
+            self.child_status_banner.display = False
+
+    def _set_child_status_text(self, message: str) -> None:
+        self._child_status_text = message
+        self._refresh_child_status_banner()
     
+    def _update_node_mode_ui(self) -> None:
+        is_child = self.node_mode == "child"
+        if is_child and not self._child_status_text:
+            self._child_status_text = "🧒 Client mode idle - waiting for jobs"
+        self._refresh_child_status_banner()
+        if self.render_button is not None:
+            self.render_button.display = not is_child
+        if self.record_run_checkbox is not None:
+            self.record_run_checkbox.display = not is_child
+        if self.save_debug_checkbox is not None:
+            self.save_debug_checkbox.display = not is_child
+        if self.cancel_button is not None and not self.is_rendering:
+            self.cancel_button.display = False if is_child else self.cancel_button.display
+        if self.child_mode_checkbox is not None and self.child_mode_checkbox.value != is_child:
+            self.child_mode_checkbox.value = is_child
+        if is_child:
+            self.write_message("🧒 Client mode enabled. This node will automatically pull jobs when available.")
+        else:
+            self.write_message("🧑‍💼 Master mode enabled. Use this node to plan and launch runs.")
+
+    def _format_elapsed(self, seconds: Optional[float]) -> str:
+        if seconds is None:
+            return "unknown"
+        if seconds < 60:
+            return f"{int(seconds)}s ago"
+        minutes = int(seconds // 60)
+        if minutes < 60:
+            return f"{minutes}m ago"
+        hours = minutes // 60
+        return f"{hours}h ago"
+
+    def _parse_last_seen(self, value: Optional[str]) -> Optional[float]:
+        if not value:
+            return None
+        try:
+            if value.endswith("Z"):
+                value = value.replace("Z", "+00:00")
+            seen = datetime.fromisoformat(value)
+            if seen.tzinfo is None:
+                seen = seen.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            delta = (now - seen).total_seconds()
+            return max(0.0, delta)
+        except Exception:
+            return None
+
+    def _update_worker_panel(self, records: Optional[List[Any]], error: Optional[str] = None) -> None:
+        if not self.worker_status_display:
+            return
+        try:
+            self.worker_status_display.clear()
+        except Exception:
+            pass
+        if error:
+            self.worker_status_display.write_line(f"⚠️ {error}")
+            return
+        if not records:
+            self.worker_status_display.write_line("No workers connected yet")
+            return
+        for rec in sorted(records, key=lambda r: getattr(r, "worker_id", "")):
+            worker_id = getattr(rec, "worker_id", "unknown")
+            mode = getattr(rec, "mode", None) or "node"
+            status = getattr(rec, "status", "unknown")
+            last_seen = self._parse_last_seen(getattr(rec, "last_seen", None))
+            age = self._format_elapsed(last_seen)
+            active = getattr(rec, "active_job_id", None)
+            extra = f"job {active}" if active else "idle"
+            self.worker_status_display.write_line(f"{worker_id} · {mode} · {status} · {extra} · {age}")
+
+    async def _worker_poll_loop(self) -> None:
+        if not self.worker_listing_enabled or _list_workers is None:
+            return
+        while True:
+            try:
+                loop = asyncio.get_event_loop()
+                records = await loop.run_in_executor(None, _list_workers)
+                self._update_worker_panel(records)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                self._update_worker_panel(None, error=str(exc))
+            await asyncio.sleep(5)
+
+    def _handle_worker_runner_event(self, event: str, payload: Dict[str, Any]) -> None:
+        message: Optional[str] = None
+        banner: Optional[str] = None
+        if event == "started":
+            store = payload.get("store") or self.worker_runner_store or "run store"
+            self.worker_runner_store = store
+            message = f"🧒 Client worker connected ({store})"
+            banner = f"🧒 Client worker ready ({store})"
+        elif event == "idle":
+            note = payload.get("note") or "waiting"
+            banner = f"🧒 Client idle ({note})"
+        elif event == "job-claimed":
+            run_id = payload.get("run_id") or "unknown"
+            job_id = payload.get("job_id") or "unknown"
+            message = f"📥 Client claimed job {job_id} from run {run_id}"
+            banner = f"🚧 Rendering run {run_id} (job {job_id})"
+        elif event == "job-completed":
+            run_id = payload.get("run_id") or "unknown"
+            job_id = payload.get("job_id") or "unknown"
+            message = f"✅ Client finished job {job_id} from run {run_id}"
+            banner = "🧒 Client idle - last job completed"
+        elif event == "job-failed":
+            run_id = payload.get("run_id") or "unknown"
+            job_id = payload.get("job_id") or "unknown"
+            error = payload.get("error") or "unknown error"
+            message = f"⚠️ Client job {job_id} from run {run_id} failed: {error}"
+            banner = "⚠️ Client idle - last job failed"
+        elif event == "job-error":
+            error = payload.get("error") or "unknown error"
+            message = f"⚠️ Client runner error: {error}"
+            banner = f"⚠️ Client error: {error}"
+        elif event == "stopped":
+            reason = payload.get("reason") or "stopped"
+            message = f"🛑 Client worker stopped ({reason})"
+            banner = f"🛑 Client stopped ({reason})"
+        if message:
+            self.write_message(message)
+        if banner:
+            self._set_child_status_text(banner)
+
+    async def _run_worker_runner(self, runner: WorkerRunner) -> None:
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(None, runner.run)
+        except asyncio.CancelledError:
+            runner.stop()
+            raise
+        except Exception as exc:
+            self.write_message(f"⚠️ Client worker crashed: {exc}")
+            self._handle_worker_runner_event("stopped", {"reason": "error", "error": str(exc)})
+        finally:
+            if self.worker_runner is runner:
+                self.worker_runner = None
+            self.worker_runner_task = None
+            self._set_child_status_text("🧒 Client mode idle - waiting for jobs")
+
+    async def _start_worker_client(self) -> None:
+        if self.worker_runner_task or self.worker_runner:
+            return
+        self._set_child_status_text("🧒 Starting client worker…")
+        self.write_message("🧒 Starting client worker…")
+        try:
+            store = build_run_store()
+            try:
+                self.worker_runner_store = store.describe()
+            except Exception:
+                self.worker_runner_store = None
+        except Exception as exc:
+            self.write_message(f"❌ Unable to initialize client worker: {exc}")
+            self._set_child_status_text(f"⚠️ Client unavailable: {exc}")
+            return
+
+        loop = asyncio.get_running_loop()
+
+        def _status_callback(event: str, payload: Dict[str, Any]) -> None:
+            try:
+                loop.call_soon_threadsafe(self._handle_worker_runner_event, event, payload)
+            except RuntimeError:
+                pass
+
+        runner = WorkerRunner(
+            store,
+            blender_executable=self.blender_exe,
+            poll_interval=15.0,
+            status_callback=_status_callback,
+        )
+        self.worker_runner = runner
+        self.worker_runner_task = asyncio.create_task(self._run_worker_runner(runner))
+        if self.worker_runner_store:
+            self.write_message(f"🧒 Client worker using store {self.worker_runner_store}")
+
+    async def _stop_worker_client(self) -> None:
+        task = self.worker_runner_task
+        runner = self.worker_runner
+        if not task:
+            return
+        self.write_message("🛑 Stopping client worker…")
+        if runner:
+            runner.stop()
+        try:
+            await asyncio.wait_for(task, timeout=10.0)
+        except asyncio.TimeoutError:
+            self.write_message("⚠️ Client worker still stopping; shutting down in background")
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self.worker_runner = None
+            self.worker_runner_task = None
+            self._set_child_status_text("🧒 Client mode idle - waiting for jobs")
+
+    async def _ensure_worker_runner(self) -> None:
+        if self.node_mode == "child":
+            await self._start_worker_client()
+        else:
+            await self._stop_worker_client()
+
+    def _send_worker_heartbeat(self, status: Optional[str] = None, info: Optional[Dict[str, Any]] = None) -> None:
+        if _record_worker_heartbeat is None or not self.worker_id:
+            return
+        heartbeat_status = status or ("busy" if self.is_rendering else "idle")
+        data = {
+            "app": "blendomatic-worker",
+            "node_mode": self.node_mode,
+            "render_pid": self.render_pid,
+        }
+        if info:
+            data.update(info)
+        try:
+            _record_worker_heartbeat(
+                self.worker_id,
+                status=heartbeat_status,
+                run_id=self.current_run.run_id if self.current_run else None,
+                active_job_id=None,
+                info=data,
+                mode=self.node_mode,
+            )
+        except Exception as exc:
+            self.write_message(f"⚠️ Heartbeat failed: {exc}")
+
+    async def _heartbeat_loop(self) -> None:
+        if _record_worker_heartbeat is None:
+            return
+        while True:
+            try:
+                self._send_worker_heartbeat()
+                await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                self.write_message(f"⚠️ Heartbeat loop error: {exc}")
+                await asyncio.sleep(10)
+
     async def tail_log_file(self, log_file_path: str):
         """Tail the Blender log file and stream output to TUI"""
         last_position = 0
@@ -1524,7 +1991,7 @@ class BlenderTUIApp(App):
             except Exception as e:
                 self.write_message(f"❌ Error tailing log: {e}")
                 break
-    
+
     @on(Button.Pressed, "#render_btn")
     async def render(self):
         if self.is_rendering:
@@ -1536,6 +2003,8 @@ class BlenderTUIApp(App):
         self.refresh()  # Force UI refresh to show button changes
         
         self.write_message("🎬 Starting render...")
+        should_reset_state = True
+        record_run = getattr(self, "record_run_enabled", True)
         
         try:
             # Validate configuration - now returns list of combinations
@@ -1555,6 +2024,32 @@ class BlenderTUIApp(App):
                     )
             
             self.write_message(f"🔧 DEBUG: Selected mode for render: '{self.selected_mode}'")
+
+            self.current_run = None
+            run_note = ""
+            if record_run:
+                try:
+                    self.current_run = create_run_record(
+                        note=run_note,
+                        mode=self.selected_mode,
+                        garment=self.selected_garment,
+                        fabrics=self.selected_fabrics,
+                        assets=self.selected_assets,
+                        views=self.selected_views,
+                        total_jobs=total_combinations,
+                        plan=configs,
+                    )
+                    self.write_message(f"🆕 Run initialized: {self.current_run.run_id}")
+
+                    jobs = expand_configs_to_jobs(self.current_run.run_id, configs)
+                    jobs_path = self.current_run.path / "jobs.json"
+                    save_job_records(jobs, jobs_path)
+                    self.write_message(f"🧾 Saved {len(jobs)} job records")
+                except Exception as run_err:
+                    self.write_message(f"❌ Failed to initialize run metadata: {run_err}")
+                    return
+            else:
+                self.write_message("ℹ️ Record run disabled — skipping run metadata and notes.")
             
             # Check if bridge is available
             if not self.session:
@@ -1574,7 +2069,10 @@ class BlenderTUIApp(App):
             
             # Pre-populate render state with planned assets
             import time
-            self.render_state = RenderRunState(run_started_at=time.time())
+            self.render_state = RenderRunState(
+                run_started_at=time.time(),
+                run_id=self.current_run.run_id if self.current_run else None,
+            )
             self.log_parser = BlenderLogParser(self.render_state)
             
             # Generate expected output filenames to seed the dashboard
@@ -1617,7 +2115,11 @@ class BlenderTUIApp(App):
                 self.render_state.assets[expected_name] = AssetStatus(name=expected_name, status="pending")
 
             # Show execution screen
-            exec_screen = ExecutionScreen(self.render_state, name="execution")
+            exec_screen = ExecutionScreen(
+                self.render_state,
+                name="execution",
+                on_exit=self._handle_execution_screen_exit,
+            )
             self.push_screen(exec_screen)
             
             start_time = asyncio.get_event_loop().time()
@@ -1654,6 +2156,7 @@ class BlenderTUIApp(App):
                     self.current_render_task = monitor_task
                     
                     # Don't wait for completion - return immediately
+                    should_reset_state = False
                     self.write_message("✅ Render started successfully! Use Cancel to stop.")
                     return
                 else:
@@ -1691,6 +2194,7 @@ class BlenderTUIApp(App):
                         self.current_render_task = monitor_task
                         
                         # Don't wait for completion - return immediately
+                        should_reset_state = False
                         self.write_message("✅ Batch render started successfully! Use Cancel to stop.")
                         return
                     else:
@@ -1739,14 +2243,8 @@ class BlenderTUIApp(App):
         except Exception as e:
             self.write_message(f"❌ Render failed: {e}")
         finally:
-            # Reset render state
-            self.is_rendering = False
-            self.render_button.display = True
-            self.cancel_button.display = False
-            self.current_render_task = None
-            self.current_log_task = None
-            self.render_pid = None
-            self.refresh()  # Force UI refresh to show button changes
+            if should_reset_state:
+                self._reset_render_state()
     
     async def monitor_render_process(self):
         """Monitor the detached render process and update status"""
@@ -1777,13 +2275,18 @@ class BlenderTUIApp(App):
                         if hasattr(self, 'render_state'):
                             self.render_state.mark_finished()
                     
-                    # Reset render state
-                    self.is_rendering = False
-                    self.render_button.display = True
-                    self.cancel_button.display = False
+                    # Stop log tail and reset UI
+                    log_task = self.current_log_task
+                    if log_task:
+                        log_task.cancel()
+                        try:
+                            await asyncio.wait_for(log_task, timeout=1.0)
+                        except (asyncio.CancelledError, asyncio.TimeoutError):
+                            pass
+                        finally:
+                            self.current_log_task = None
                     self.current_render_task = None
-                    self.render_pid = None
-                    self.refresh()
+                    self._reset_render_state()
                     break
                 
                 # Still running, wait before checking again
@@ -1839,27 +2342,56 @@ class BlenderTUIApp(App):
         except Exception as e:
             self.write_message(f"⚠️ Error during cancellation: {e}")
         
-        # Reset state
-        self.is_rendering = False
-        self.render_button.display = True
-        self.cancel_button.display = False
-        self.current_render_task = None
-        self.current_log_task = None
-        self.render_pid = None
-        self.refresh()  # Force UI refresh to show button changes
-        
+        self._reset_render_state()
         self.write_message("🛑 Render cancelled")
+
+    async def _handle_execution_screen_exit(self) -> None:
+        """Ensure any detached render is stopped before leaving the dashboard."""
+        if self.is_rendering:
+            await self.cancel_render()
+        else:
+            self._force_stop_background_render_tasks()
+
+    def _force_stop_background_render_tasks(self) -> None:
+        """Kill background monitoring tasks and reset UI state."""
+        if self.current_render_task:
+            try:
+                self.current_render_task.cancel()
+            except Exception:
+                pass
+            self.current_render_task = None
+        if self.current_log_task:
+            try:
+                self.current_log_task.cancel()
+            except Exception:
+                pass
+            self.current_log_task = None
+        self._reset_render_state()
     
     async def on_unmount(self):
         """Clean up when app closes"""
         self.write_message("🔄 Cleaning up...")
+        if self._worker_log_sink_active and _set_worker_log_sink is not None:
+            try:
+                _set_worker_log_sink(None)
+            except Exception:
+                pass
+            self._worker_log_sink_active = False
         
+        await self._stop_worker_client()
+
         # Cancel any active render monitoring
         if self.current_render_task:
             self.current_render_task.cancel()
         
         if self.current_log_task:
             self.current_log_task.cancel()
+
+        if self.worker_poll_task:
+            self.worker_poll_task.cancel()
+
+        if self.heartbeat_task:
+            self.heartbeat_task.cancel()
         
         # Note: We don't kill the render process here since it should continue
         # running independently. Use cleanup_renders.py to manage orphans.

@@ -1,3 +1,5 @@
+.env
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -190,3 +192,4 @@ Thumbs.db
 # Project specific temporary directories
 blendomatic_*/
 node_modules
+public/asset-thumbnails/

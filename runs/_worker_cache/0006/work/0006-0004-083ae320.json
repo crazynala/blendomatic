@@ -1,0 +1,15 @@
+{
+  "job_id": "0006-0004-083ae320",
+  "run_id": "0006",
+  "config": {
+    "command": "render_with_config",
+    "args": {
+      "mode": "fast",
+      "garment": "service_shirt_f.json",
+      "fabric": "gul_mustard.json",
+      "asset": "Body Long Sleeve Variant",
+      "view": "default",
+      "save_debug_files": false
+    }
+  }
+}

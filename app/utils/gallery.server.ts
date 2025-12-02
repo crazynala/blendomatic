@@ -48,15 +48,7 @@ type GalleryEntry = {
   fabrics: FabricEntry[];
 };
 
-type ModeInfo = {
-  name: string;
-  dates: string[];
-};
-
 type DescribeRendersResult = {
-  modes: ModeInfo[];
-  selectedMode: string | null;
-  selectedDate: string | null;
   gallery: GalleryEntry[];
   configOptions: ConfigOptions;
 };
@@ -201,24 +193,6 @@ function findMatchingSuffix(
     }
   }
   return fallbackFromRemainder(remainder);
-}
-
-async function collectModes(): Promise<ModeInfo[]> {
-  const entries = await safeReadDir(RENDERS_DIR);
-  const modes = [];
-  for (const entry of entries) {
-    if (!isVisibleDir(entry)) continue;
-    const modeName = entry.name;
-    const modePath = path.join(RENDERS_DIR, modeName);
-    const dateEntries = await safeReadDir(modePath);
-    const dates = dateEntries
-      .filter(isVisibleDir)
-      .map((dir) => dir.name)
-      .sort((a, b) => (a < b ? 1 : -1));
-    modes.push({ name: modeName, dates });
-  }
-  modes.sort((a, b) => a.name.localeCompare(b.name));
-  return modes;
 }
 
 async function loadGarmentViewIndex(): Promise<Map<string, ViewMeta>> {
@@ -413,44 +387,22 @@ async function buildGallery({
 }
 
 export async function describeRenders(
-  requestedMode?: string | null,
-  requestedDate?: string | null
+  mode?: string | null,
+  date?: string | null
 ): Promise<DescribeRendersResult> {
-  const modes = await collectModes();
-  const modeNames = modes.map((mode) => mode.name);
-  const selectedMode =
-    requestedMode && modeNames.includes(requestedMode)
-      ? requestedMode
-      : modeNames[0] ?? null;
-  const dateOptions =
-    modes.find((mode) => mode.name === selectedMode)?.dates ?? [];
-  const selectedDate =
-    requestedDate && dateOptions.includes(requestedDate)
-      ? requestedDate
-      : dateOptions[0] ?? null;
-
   const garmentViews = await loadGarmentViewIndex();
   const fabrics = await loadFabricIndex();
   const gallery = await buildGallery({
-    mode: selectedMode,
-    date: selectedDate,
+    mode: mode ?? null,
+    date: date ?? null,
     garmentViews,
     fabrics,
   });
 
   return {
-    modes,
-    selectedMode,
-    selectedDate,
     gallery,
     configOptions: CONFIG_OPTIONS,
   };
 }
 
-export type {
-  DescribeRendersResult,
-  GalleryEntry,
-  FabricEntry,
-  LayerEntry,
-  ModeInfo,
-};
+export type { DescribeRendersResult, GalleryEntry, FabricEntry, LayerEntry };

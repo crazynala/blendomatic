@@ -1,0 +1,15 @@
+{
+  "job_id": "0005-0026-3659aed3",
+  "run_id": "0005",
+  "config": {
+    "command": "render_with_config",
+    "args": {
+      "mode": "fast",
+      "garment": "service_shirt_f.json",
+      "fabric": "palm_beach_light_gray.json",
+      "asset": "Regular Collar Variant",
+      "view": "default",
+      "save_debug_files": false
+    }
+  }
+}

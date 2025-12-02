@@ -10,3 +10,9 @@ rich>=13.0.0
 
 # Optional: Enhanced prompts and selections
 questionary>=2.0.0
+
+# AWS SDK for worker heartbeat storage (S3)
+boto3>=1.34.0
+
+# Environment variable loading
+python-dotenv>=1.0.0

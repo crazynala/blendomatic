@@ -1,11 +1,14 @@
+import asyncio
 from textual.app import ComposeResult
 from textual.screen import Screen
 from textual.containers import Vertical, Horizontal
 from textual.widgets import Static, DataTable, ProgressBar, Button
 from textual import events
-from typing import Optional, List
+from typing import Optional, List, Callable, Awaitable
 
 from render_state import RenderRunState, compute_global_progress, AssetStatus
+
+ExitCallback = Callable[[], Awaitable[None]]
 
 
 class ExecutionScreen(Screen):
@@ -60,12 +63,19 @@ class ExecutionScreen(Screen):
     }
     """
 
-    def __init__(self, state: RenderRunState, name: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        state: RenderRunState,
+        name: Optional[str] = None,
+        on_exit: Optional[ExitCallback] = None,
+    ) -> None:
         super().__init__(name=name)
         self.state = state
         self.progress_bar: Optional[ProgressBar] = None
         self.summary_label: Optional[Static] = None
         self.table: Optional[DataTable] = None
+        self._on_exit = on_exit
+        self._exit_task: Optional[asyncio.Task[None]] = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="exec_container"):
@@ -181,7 +191,20 @@ class ExecutionScreen(Screen):
         )
 
     def action_back(self) -> None:
-        self.app.pop_screen()
+        if self._exit_task and not self._exit_task.done():
+            return
+        self._exit_task = asyncio.create_task(self._handle_exit())
+
+    async def _handle_exit(self) -> None:
+        if self._on_exit:
+            try:
+                await self._on_exit()
+            except Exception as exc:
+                self.app.log(f"ExecutionScreen exit callback error: {exc}")
+        try:
+            self.app.pop_screen()
+        except Exception as exc:
+            self.app.log(f"ExecutionScreen pop error: {exc}")
         
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "back_btn":

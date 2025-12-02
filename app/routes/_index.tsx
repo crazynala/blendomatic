@@ -18,6 +18,8 @@ import {
 } from "@mantine/core";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { describeRenders, type LayerEntry } from "../utils/gallery.server";
+import { listRunSummaries } from "../utils/run-store.server";
+import { WorkspaceNav } from "../components/workspace-nav";
 
 type ConfigState = Record<string, string>;
 
@@ -41,12 +43,33 @@ const canvasStyles: Record<"outer" | "inner" | "layer", CSSProperties> = {
   },
 };
 
+const runStatusColor: Record<string, string> = {
+  running: "blue",
+  pending: "gray",
+  completed: "green",
+  attention: "red",
+};
+
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url);
-  const mode = url.searchParams.get("mode");
-  const date = url.searchParams.get("date");
-  const data = await describeRenders(mode, date);
-  return json(data);
+  const requestedRun = url.searchParams.get("run");
+  const runs = await listRunSummaries(200);
+  const selectedRun =
+    runs.find((entry) => entry.runId === requestedRun) ?? runs[0] ?? null;
+  const renderFolder = selectedRun
+    ? deriveRenderFolder(selectedRun.createdAt ?? selectedRun.lastActivity)
+    : null;
+  const galleryData = await describeRenders(
+    selectedRun?.mode ?? null,
+    renderFolder
+  );
+  return json({
+    runs,
+    selectedRunId: selectedRun?.runId ?? null,
+    renderFolder,
+    gallery: galleryData.gallery,
+    configOptions: galleryData.configOptions,
+  });
 }
 
 type LoaderData = Awaited<ReturnType<typeof loader>>;
@@ -62,8 +85,25 @@ const createInitialConfig = (
   );
 };
 
+const deriveRenderFolder = (timestamp?: string | null) => {
+  if (!timestamp) return null;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+};
+
+const formatRunTimestamp = (value?: string | null) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
+};
+
 export default function GalleryRoute() {
-  const { modes, selectedMode, selectedDate, gallery, configOptions } =
+  const { runs, selectedRunId, renderFolder, gallery, configOptions } =
     useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -81,9 +121,21 @@ export default function GalleryRoute() {
     [configOptions]
   );
 
-  const dateOptions = useMemo(() => {
-    return modes.find((mode) => mode.name === selectedMode)?.dates ?? [];
-  }, [modes, selectedMode]);
+  const runOptions = useMemo(
+    () =>
+      runs.map((run) => ({
+        value: run.runId,
+        label: `${run.runId} • ${run.mode ?? "–"} • ${
+          formatRunTimestamp(run.createdAt) ?? "unknown"
+        }`,
+      })),
+    [runs]
+  );
+
+  const selectedRun = useMemo(
+    () => runs.find((run) => run.runId === selectedRunId) ?? null,
+    [runs, selectedRunId]
+  );
 
   const flattenedFabrics = useMemo(() => {
     return gallery.flatMap((entry) =>
@@ -96,22 +148,15 @@ export default function GalleryRoute() {
     );
   }, [gallery]);
 
-  const handleModeChange = (value: string | null) => {
-    if (!value) return;
+  const handleRunChange = (value: string | null) => {
     const params = new URLSearchParams(searchParams);
-    params.set("mode", value);
-    params.delete("date");
-    navigate(`/?${params.toString()}`);
-  };
-
-  const handleDateChange = (value: string | null) => {
-    if (!value) return;
-    const params = new URLSearchParams(searchParams);
-    if (selectedMode) {
-      params.set("mode", selectedMode);
+    if (value) {
+      params.set("run", value);
+    } else {
+      params.delete("run");
     }
-    params.set("date", value);
-    navigate(`/?${params.toString()}`);
+    const query = params.toString();
+    navigate(query ? `/?${query}` : "/");
   };
 
   const computeVisibleLayers = (layers: LayerEntry[]): LayerEntry[] => {
@@ -160,6 +205,7 @@ export default function GalleryRoute() {
   return (
     <Container size="xl" py="xl">
       <Stack gap="xl">
+        <WorkspaceNav />
         <Stack gap="xs">
           <Title order={2}>Render Explorer</Title>
           <Text c="dimmed">
@@ -170,31 +216,48 @@ export default function GalleryRoute() {
 
         <Card withBorder radius="lg" padding="lg">
           <Stack gap="md">
-            <Group gap="md" align="flex-end">
+            <Stack gap="sm">
               <Select
-                label="Mode"
-                placeholder="Select mode"
-                data={modes.map((mode) => ({
-                  label: mode.name,
-                  value: mode.name,
-                }))}
-                value={selectedMode}
-                onChange={handleModeChange}
+                label="Run"
+                placeholder="Select a run"
+                data={runOptions}
+                value={selectedRunId}
+                onChange={handleRunChange}
+                searchable
                 allowDeselect={false}
+                nothingFound="No runs"
+                disabled={!runOptions.length}
               />
-              <Select
-                label="Date"
-                placeholder="Select date"
-                data={dateOptions.map((date) => ({
-                  label: date,
-                  value: date,
-                }))}
-                value={selectedDate}
-                onChange={handleDateChange}
-                allowDeselect={false}
-                disabled={!dateOptions.length}
-              />
-            </Group>
+              {selectedRun ? (
+                <Group justify="space-between" align="flex-start">
+                  <Stack gap={4}>
+                    <Text fw={600}>Run {selectedRun.runId}</Text>
+                    <Text size="sm" c="dimmed">
+                      Mode {selectedRun.mode ?? "—"} • Folder{" "}
+                      {renderFolder ?? "—"}
+                    </Text>
+                    <Text size="sm" c="dimmed">
+                      {selectedRun.note?.trim() || "No operator note"}
+                    </Text>
+                    <Text size="sm">
+                      {selectedRun.completedJobs}/{selectedRun.totalJobs}{" "}
+                      completed
+                    </Text>
+                  </Stack>
+                  <Badge
+                    color={
+                      runStatusColor[
+                        selectedRun.status?.toLowerCase() ?? "pending"
+                      ] ?? "gray"
+                    }
+                  >
+                    {selectedRun.status ?? "pending"}
+                  </Badge>
+                </Group>
+              ) : (
+                <Text c="dimmed">No runs available yet.</Text>
+              )}
+            </Stack>
 
             <Divider label="Configuration" labelPosition="center" />
 
@@ -224,8 +287,8 @@ export default function GalleryRoute() {
 
         {!flattenedFabrics.length ? (
           <Alert title="No renders found" color="yellow" variant="filled">
-            We couldn&apos;t find any PNG outputs for this mode/date. Try
-            another combination once renders are available.
+            We couldn&apos;t find any PNG outputs for this run. Try a different
+            run once additional renders are available.
           </Alert>
         ) : (
           <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="lg">

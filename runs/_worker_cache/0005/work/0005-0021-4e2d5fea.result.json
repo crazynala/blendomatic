@@ -1,0 +1,12 @@
+{
+  "job_id": "0005-0021-4e2d5fea",
+  "run_id": "0005",
+  "result": {
+    "success": true,
+    "result": "Render started (PID: 38111)",
+    "pid": 38111,
+    "log_file": "/Users/dan/Projects-Local/blendomatic/logs/2025-12-02/render_render_with_config_20251202_164342_759.log",
+    "pid_file": "/var/folders/x1/q0ylw2q547gb019xh26fmnt00000gn/T/blendomatic_0ri6o6hr/render_38111.pid",
+    "detached": true
+  }
+}

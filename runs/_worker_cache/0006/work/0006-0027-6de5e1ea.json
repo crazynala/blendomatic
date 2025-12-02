@@ -1,0 +1,15 @@
+{
+  "job_id": "0006-0027-6de5e1ea",
+  "run_id": "0006",
+  "config": {
+    "command": "render_with_config",
+    "args": {
+      "mode": "fast",
+      "garment": "service_shirt_f.json",
+      "fabric": "palm_beach_light_gray.json",
+      "asset": "Button Down Collar Variant",
+      "view": "default",
+      "save_debug_files": false
+    }
+  }
+}

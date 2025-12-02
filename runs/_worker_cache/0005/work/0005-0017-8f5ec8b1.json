@@ -1,0 +1,15 @@
+{
+  "job_id": "0005-0017-8f5ec8b1",
+  "run_id": "0005",
+  "config": {
+    "command": "render_with_config",
+    "args": {
+      "mode": "fast",
+      "garment": "service_shirt_f.json",
+      "fabric": "navy_royal_oxford.json",
+      "asset": "Body Short Sleeve Variant",
+      "view": "default",
+      "save_debug_files": false
+    }
+  }
+}

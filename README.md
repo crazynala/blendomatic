@@ -211,6 +211,32 @@ Fabric Applied:  ✅
 [RENDER] Output saved to: renders/service_shirt_M/service_shirt_M-hera_white-band_collar.png
 ```
 
+## 🧵 Worker Daemon
+
+Run `worker_daemon.py` on any machine with Blender installed to process the run bundles generated from the Remix UI. The daemon polls the run store (local `runs/` folder or an `s3://` prefix configured via `BLENDOMATIC_RUN_STORE` / `BLENDOMATIC_S3_STORE`), claims jobs, mirrors the run-specific config snapshot into its environment, renders with the `blender_tui_bridge`, and then uploads the outputs back to the run directory.
+
+```bash
+# Example: poll every 30 seconds using the default Blender binary
+python worker_daemon.py --interval 30
+
+# Example: custom Blender path and single-run mode
+python worker_daemon.py --blender /Applications/Blender.app/Contents/MacOS/Blender --run 0042
+```
+
+Required env vars:
+
+- `BLENDOMATIC_RUN_STORE` (or `BLENDOMATIC_S3_STORE`): S3 bucket/prefix such as `s3://smocksupply/blendomatic`
+- `BLENDOMATIC_WORKER_STORE`: same bucket/prefix so heartbeats are recorded next to `runs/`
+- Standard AWS credentials (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`)
+
+The daemon also honors the new config overrides exported by run bundles:
+
+- `BLENDOMATIC_RENDER_CONFIG`
+- `BLENDOMATIC_GARMENTS_DIR`
+- `BLENDOMATIC_FABRICS_DIR`
+
+Those variables are set automatically per job so each render uses the exact JSON snapshot that was uploaded with the run.
+
 ## 🎨 Interface Comparison
 
 | Feature              | Wizard      | Shell      | TUI            |

@@ -21,6 +21,7 @@ class RenderRunState:
     current_asset_name: Optional[str] = None
     run_started_at: float = field(default_factory=time.time)
     run_finished_at: Optional[float] = None
+    run_id: Optional[str] = None
 
     @property
     def total_assets(self) -> int:
