@@ -18,7 +18,7 @@ import {
 } from "@mantine/core";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { describeRenders, type LayerEntry } from "../utils/gallery.server";
-import { listRunSummaries } from "../utils/run-store.server";
+import { listRunSummaries, getRunDetail } from "../utils/run-store.server";
 import { WorkspaceNav } from "../components/workspace-nav";
 
 type ConfigState = Record<string, string>;
@@ -59,9 +59,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const renderFolder = selectedRun
     ? deriveRenderFolder(selectedRun.createdAt ?? selectedRun.lastActivity)
     : null;
+  const runDetail = selectedRun
+    ? await getRunDetail(selectedRun.runId)
+    : null;
   const galleryData = await describeRenders(
     selectedRun?.mode ?? null,
-    renderFolder
+    renderFolder,
+    runDetail?.jobs ?? []
   );
   return json({
     runs,

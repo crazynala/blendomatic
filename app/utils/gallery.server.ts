@@ -78,12 +78,6 @@ type FabricMeta = {
   label: string;
 };
 
-type SuffixMatch = {
-  suffix: string;
-  fabricSlug: string;
-  assetMeta: AssetMeta;
-};
-
 const ROOT_DIR = process.cwd();
 const GARMENTS_DIR = path.join(ROOT_DIR, "garments");
 const FABRICS_DIR = path.join(ROOT_DIR, "fabrics");
@@ -136,64 +130,9 @@ async function safeParseJson<T>(filePath: string): Promise<T | null> {
   }
 }
 
-function isVisibleDir(dirent: Dirent): boolean {
-  return dirent.isDirectory() && !dirent.name.startsWith(".");
-}
-
-function isPng(dirent: Dirent): boolean {
-  return dirent.isFile() && dirent.name.toLowerCase().endsWith(".png");
-}
-
 function getLayerOrder(category: string | null): number {
   const key = category ?? "base";
   return layerPriorityLookup.get(key) ?? LAYER_FALLBACK_ORDER;
-}
-
-function fallbackFromRemainder(remainder: string): SuffixMatch | null {
-  const lastDash = remainder.lastIndexOf("-");
-  if (lastDash === -1) {
-    return null;
-  }
-  const fabricSlug = remainder.slice(0, lastDash);
-  const suffix = remainder.slice(lastDash + 1) || "base";
-  if (!fabricSlug) return null;
-  return {
-    suffix,
-    fabricSlug,
-    assetMeta: {
-      suffix,
-      name: suffix,
-      category: null,
-      optionValue: null,
-      order: getLayerOrder(null),
-    },
-  };
-}
-
-function findMatchingSuffix(
-  remainder: string,
-  assetMeta: AssetMeta[]
-): SuffixMatch | null {
-  if (!assetMeta || assetMeta.length === 0) {
-    return fallbackFromRemainder(remainder);
-  }
-  const sorted = [...assetMeta].sort(
-    (a, b) => b.suffix.length - a.suffix.length
-  );
-  for (const meta of sorted) {
-    const token = `-${meta.suffix}`;
-    if (remainder.endsWith(token)) {
-      const fabricSlug = remainder.slice(0, remainder.length - token.length);
-      if (fabricSlug) {
-        return {
-          suffix: meta.suffix,
-          fabricSlug,
-          assetMeta: meta,
-        };
-      }
-    }
-  }
-  return fallbackFromRemainder(remainder);
 }
 
 async function loadGarmentViewIndex(): Promise<Map<string, ViewMeta>> {
@@ -272,10 +211,10 @@ async function loadFabricIndex(): Promise<Map<string, FabricMeta>> {
 }
 
 type BuildGalleryArgs = {
-  mode: string | null;
-  date: string | null;
+  jobs: RunJobRecord[];
   garmentViews: Map<string, ViewMeta>;
   fabrics: Map<string, FabricMeta>;
+  mode?: string | null;
 };
 
 type InternalGalleryEntry = {
@@ -287,78 +226,112 @@ type InternalGalleryEntry = {
   fabrics: Map<string, FabricEntry>;
 };
 
+const stripJsonExtension = (value?: string | null): string | null => {
+  if (!value) return null;
+  return value.replace(/\.json$/iu, "");
+};
+
+const normalizeFabricSlug = (value?: string | null): string | null => {
+  const stripped = stripJsonExtension(value);
+  if (!stripped) return null;
+  return slugify(stripped, "fabric");
+};
+
+const normalizeAssetSuffix = (value?: string | null): string => {
+  return slugify(value ?? "asset", "asset");
+};
+
+const resolveAssetMeta = (
+  viewMeta: ViewMeta,
+  suffix: string,
+  fallbackLabel: string
+): AssetMeta => {
+  const match = viewMeta.assetMeta.find((entry) => entry.suffix === suffix);
+  if (match) {
+    return match;
+  }
+  const categoryInfo = categorizeSuffix(suffix);
+  return {
+    suffix,
+    name: sanitizeName(fallbackLabel, suffix),
+    category: categoryInfo?.category ?? null,
+    optionValue: categoryInfo?.optionValue ?? null,
+    order: getLayerOrder(categoryInfo?.category ?? null),
+  };
+};
+
 async function buildGallery({
-  mode,
-  date,
+  jobs,
   garmentViews,
   fabrics,
+  mode,
 }: BuildGalleryArgs): Promise<GalleryEntry[]> {
-  if (!mode || !date) {
-    return [];
-  }
-  const runDir = path.join(RENDERS_DIR, mode, date);
-  const viewEntries = await safeReadDir(runDir);
-  if (viewEntries.length === 0) {
+  if (!jobs || jobs.length === 0) {
     return [];
   }
 
   const galleryMap = new Map<string, InternalGalleryEntry>();
 
-  for (const viewEntry of viewEntries) {
-    if (!isVisibleDir(viewEntry)) continue;
-    const viewName = viewEntry.name;
-    const viewMeta = garmentViews.get(viewName);
+  for (const job of jobs) {
+    if (mode && job.config?.mode && job.config.mode !== mode) {
+      continue;
+    }
+    const assetLocation = buildAssetPublicUrl(job.result?.uploaded ?? null);
+    if (!assetLocation) {
+      continue;
+    }
+    const viewPrefix = job.config?.view_output_prefix;
+    if (!viewPrefix) continue;
+    const viewMeta = garmentViews.get(viewPrefix);
     if (!viewMeta) continue;
 
-    const viewPath = path.join(runDir, viewName);
-    const fileEntries = await safeReadDir(viewPath);
-    const pngFiles = fileEntries.filter(isPng);
+    const fabricSlug =
+      normalizeFabricSlug(job.config?.fabric) ??
+      normalizeFabricSlug(job.config?.fabric_slug);
+    if (!fabricSlug) continue;
+    const fabricMeta = fabrics.get(fabricSlug) ?? { label: fabricSlug };
 
-    for (const png of pngFiles) {
-      const fileName = png.name;
-      const baseName = fileName.replace(/\.png$/i, "");
-      const prefix = `${viewName}-`;
-      if (!baseName.startsWith(prefix)) continue;
-      const remainder = baseName.slice(prefix.length);
-      const match = findMatchingSuffix(remainder, viewMeta.assetMeta);
-      if (!match) continue;
-      const { suffix, fabricSlug, assetMeta } = match;
-      const fabricMeta = fabrics.get(fabricSlug) ?? { label: fabricSlug };
+    const assetSuffix = normalizeAssetSuffix(
+      job.config?.asset_suffix ?? job.config?.asset
+    );
+    const assetMeta = resolveAssetMeta(
+      viewMeta,
+      assetSuffix,
+      job.config?.asset ?? assetSuffix
+    );
 
-      const entryKey = `${viewMeta.garmentId}:${viewMeta.viewCode}`;
-      let entry = galleryMap.get(entryKey);
-      if (!entry) {
-        entry = {
-          id: entryKey,
-          garmentId: viewMeta.garmentId,
-          garmentName: viewMeta.garmentName,
-          viewCode: viewMeta.viewCode,
-          viewLabel: viewMeta.viewLabel,
-          fabrics: new Map(),
-        };
-        galleryMap.set(entryKey, entry);
-      }
-
-      let fabricEntry = entry.fabrics.get(fabricSlug);
-      if (!fabricEntry) {
-        fabricEntry = {
-          key: fabricSlug,
-          label: fabricMeta.label ?? fabricSlug,
-          layers: [],
-        };
-        entry.fabrics.set(fabricSlug, fabricEntry);
-      }
-
-      const relativePath = path.posix.join(mode, date, viewName, fileName);
-      fabricEntry.layers.push({
-        suffix,
-        label: assetMeta.name,
-        category: assetMeta.category,
-        optionValue: assetMeta.optionValue,
-        order: assetMeta.order,
-        url: `/renders/${relativePath}`,
-      });
+    const entryKey = `${viewMeta.garmentId}:${viewMeta.viewCode}`;
+    let entry = galleryMap.get(entryKey);
+    if (!entry) {
+      entry = {
+        id: entryKey,
+        garmentId: viewMeta.garmentId,
+        garmentName: viewMeta.garmentName,
+        viewCode: viewMeta.viewCode,
+        viewLabel: viewMeta.viewLabel,
+        fabrics: new Map(),
+      };
+      galleryMap.set(entryKey, entry);
     }
+
+    let fabricEntry = entry.fabrics.get(fabricSlug);
+    if (!fabricEntry) {
+      fabricEntry = {
+        key: fabricSlug,
+        label: fabricMeta.label ?? fabricSlug,
+        layers: [],
+      };
+      entry.fabrics.set(fabricSlug, fabricEntry);
+    }
+
+    fabricEntry.layers.push({
+      suffix: assetMeta.suffix,
+      label: assetMeta.name,
+      category: assetMeta.category,
+      optionValue: assetMeta.optionValue,
+      order: assetMeta.order,
+      url: assetLocation,
+    });
   }
 
   return Array.from(galleryMap.values())
@@ -389,15 +362,16 @@ async function buildGallery({
 
 export async function describeRenders(
   mode?: string | null,
-  date?: string | null
+  _date?: string | null,
+  jobs: RunJobRecord[] = []
 ): Promise<DescribeRendersResult> {
   const garmentViews = await loadGarmentViewIndex();
   const fabrics = await loadFabricIndex();
   const gallery = await buildGallery({
-    mode: mode ?? null,
-    date: date ?? null,
+    jobs,
     garmentViews,
     fabrics,
+    mode: mode ?? null,
   });
 
   return {
