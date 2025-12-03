@@ -1,11 +1,10 @@
 import { json } from "@remix-run/node";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import {
   Link,
   useLoaderData,
   useRevalidator,
   useSearchParams,
-  useFetcher,
 } from "@remix-run/react";
 import {
   Badge,
@@ -16,13 +15,6 @@ import {
   Progress,
   SegmentedControl,
   SimpleGrid,
-  Modal,
-  Select,
-  MultiSelect,
-  Textarea,
-  Switch,
-  Divider,
-  Alert,
   Stack,
   Table,
   Text,
@@ -31,15 +23,10 @@ import {
 import {
   IconAlertTriangle,
   IconPlus,
-  IconInfoCircle,
 } from "@tabler/icons-react";
-import { useDisclosure } from "@mantine/hooks";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo } from "react";
 import {
   loadRunFormOptions,
-  createRunFromSelection,
-  type RunFormOptions,
-  type RunSelection,
 } from "../utils/run-planner.server";
 import { listRunSummaries } from "../utils/run-store.server";
 import { WorkspaceNav } from "../components/workspace-nav";
@@ -49,44 +36,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const filter = url.searchParams.get("filter") ?? "all";
   const summaries = await listRunSummaries(200);
   const runOptions = await loadRunFormOptions();
-  return json({ summaries, filter, runOptions });
-}
-
-export async function action({ request }: ActionFunctionArgs) {
-  const formData = await request.formData();
-  const intent = formData.get("intent");
-  if (intent !== "create-run") {
-    return json({ success: false, error: "Unknown intent" }, { status: 400 });
-  }
-  const payloadRaw = formData.get("payload");
-  if (typeof payloadRaw !== "string") {
-    return json({ success: false, error: "Missing payload" }, { status: 400 });
-  }
-
-  let parsed: RunSelection;
-  try {
-    parsed = JSON.parse(payloadRaw) as RunSelection;
-  } catch (error) {
-    return json({ success: false, error: "Invalid payload" }, { status: 400 });
-  }
-
-  try {
-    const result = await createRunFromSelection(parsed);
-    return json({
-      success: true,
-      runId: result.runId,
-      totalJobs: result.totalJobs,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return json({ success: false, error: message }, { status: 400 });
-  }
+  const canCreateRuns =
+    runOptions.modes.length > 0 &&
+    runOptions.garments.length > 0 &&
+    runOptions.fabrics.length > 0;
+  return json({ summaries, filter, canCreateRuns });
 }
 
 type LoaderData = {
   summaries: Awaited<ReturnType<typeof listRunSummaries>>;
   filter: string;
-  runOptions: RunFormOptions;
+  canCreateRuns: boolean;
 };
 
 type FilterKey = "all" | "active" | "attention" | "completed" | "pending";
@@ -128,16 +88,9 @@ function categorizeRuns(summaries: LoaderData["summaries"]) {
 }
 
 export default function RunsIndexRoute() {
-  const { summaries, filter, runOptions } = useLoaderData<LoaderData>();
+  const { summaries, filter, canCreateRuns } = useLoaderData<LoaderData>();
   const [searchParams, setSearchParams] = useSearchParams();
   const revalidator = useRevalidator();
-  const [newRunOpened, { open: openNewRun, close: closeNewRun }] =
-    useDisclosure(false);
-
-  const handleRunCreated = useCallback(() => {
-    closeNewRun();
-    revalidator.revalidate();
-  }, [closeNewRun, revalidator]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -177,19 +130,10 @@ export default function RunsIndexRoute() {
     setSearchParams(next);
   };
 
-  const creationDisabled =
-    runOptions.modes.length === 0 ||
-    runOptions.garments.length === 0 ||
-    runOptions.fabrics.length === 0;
+  const creationDisabled = !canCreateRuns;
 
   return (
     <Container size="xl" py="xl">
-      <NewRunModal
-        opened={newRunOpened}
-        onClose={closeNewRun}
-        onCreated={handleRunCreated}
-        options={runOptions}
-      />
       <Stack gap="xl">
         <WorkspaceNav />
         <Group justify="space-between" align="flex-start">
@@ -201,10 +145,11 @@ export default function RunsIndexRoute() {
             </Text>
           </Stack>
           <Button
+            component={Link}
+            to="/runs/new"
             variant="filled"
             color="grape"
             leftSection={<IconPlus size={16} />}
-            onClick={openNewRun}
             disabled={creationDisabled}
           >
             New Run
@@ -351,283 +296,6 @@ export default function RunsIndexRoute() {
         </Card>
       </Stack>
     </Container>
-  );
-}
-
-type NewRunModalProps = {
-  opened: boolean;
-  onClose: () => void;
-  onCreated: () => void;
-  options: RunFormOptions;
-};
-
-function NewRunModal({
-  opened,
-  onClose,
-  onCreated,
-  options,
-}: NewRunModalProps) {
-  const fetcher = useFetcher<typeof action>();
-  const [mode, setMode] = useState(() => options.modes[0]?.value ?? "");
-  const [garmentId, setGarmentId] = useState(
-    () => options.garments[0]?.id ?? ""
-  );
-  const [selectedFabrics, setSelectedFabrics] = useState<string[]>(() =>
-    options.fabrics.map((fabric) => fabric.id)
-  );
-  const [selectedAssets, setSelectedAssets] = useState<string[]>(() =>
-    (options.garments[0]?.assets ?? []).map((asset) => asset.name)
-  );
-  const [selectedViews, setSelectedViews] = useState<string[]>(() =>
-    (options.garments[0]?.views ?? []).map((view) => view.code)
-  );
-  const [note, setNote] = useState("");
-  const [saveDebugFiles, setSaveDebugFiles] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const lastHandledRun = useRef<string | null>(null);
-  const optionsRef = useRef(options);
-  const wasOpened = useRef(opened);
-
-  useEffect(() => {
-    optionsRef.current = options;
-  }, [options]);
-
-  const resetForm = useCallback(() => {
-    const current = optionsRef.current;
-    const defaultMode = current.modes[0]?.value ?? "";
-    const defaultGarment = current.garments[0]?.id ?? "";
-    const garmentDef =
-      current.garments.find((g) => g.id === defaultGarment) ??
-      current.garments[0] ??
-      null;
-    setMode(defaultMode);
-    setGarmentId(defaultGarment);
-    setSelectedFabrics(current.fabrics.map((fabric) => fabric.id));
-    setSelectedAssets(garmentDef?.assets.map((asset) => asset.name) ?? []);
-    setSelectedViews(garmentDef?.views.map((view) => view.code) ?? []);
-    setNote("");
-    setSaveDebugFiles(false);
-    setFormError(null);
-  }, []);
-
-  useEffect(() => {
-    if (opened && !wasOpened.current) {
-      resetForm();
-    }
-    if (!opened) {
-      setFormError(null);
-    }
-    wasOpened.current = opened;
-  }, [opened, resetForm]);
-
-  const garment = useMemo(() => {
-    return options.garments.find((entry) => entry.id === garmentId) ?? null;
-  }, [garmentId, options.garments]);
-
-  useEffect(() => {
-    if (!garment) {
-      setSelectedAssets([]);
-      setSelectedViews([]);
-      return;
-    }
-    setSelectedAssets(garment.assets.map((asset) => asset.name));
-    setSelectedViews(garment.views.map((view) => view.code));
-  }, [garmentId]);
-
-  const isSubmitting = fetcher.state !== "idle";
-  const serverError =
-    fetcher.data && !fetcher.data.success ? fetcher.data.error ?? null : null;
-  const errorMessage = formError || serverError;
-
-  useEffect(() => {
-    if (fetcher.data?.success && fetcher.data.runId) {
-      if (lastHandledRun.current === fetcher.data.runId) {
-        return;
-      }
-      lastHandledRun.current = fetcher.data.runId;
-      onCreated();
-    }
-  }, [fetcher.data, onCreated]);
-
-  const garmentOptions = useMemo(
-    () =>
-      options.garments.map((entry) => ({
-        value: entry.id,
-        label: entry.name,
-      })),
-    [options.garments]
-  );
-
-  const fabricOptions = useMemo(
-    () =>
-      options.fabrics.map((fabric) => ({
-        value: fabric.id,
-        label: fabric.name,
-      })),
-    [options.fabrics]
-  );
-
-  const assetOptions = useMemo(
-    () =>
-      (garment?.assets ?? []).map((asset) => ({
-        value: asset.name,
-        label: asset.name,
-      })),
-    [garment]
-  );
-
-  const viewOptions = useMemo(
-    () =>
-      (garment?.views ?? []).map((view) => ({
-        value: view.code,
-        label: view.label,
-      })),
-    [garment]
-  );
-
-  const modeOptions = useMemo(
-    () =>
-      options.modes.map((entry) => ({
-        value: entry.value,
-        label: entry.label,
-      })),
-    [options.modes]
-  );
-
-  const estimatedJobs =
-    selectedFabrics.length * selectedAssets.length * selectedViews.length;
-
-  const handleSubmit = () => {
-    setFormError(null);
-    if (!mode || !garmentId) {
-      setFormError("Select a mode and garment");
-      return;
-    }
-    if (!selectedFabrics.length) {
-      setFormError("Select at least one fabric");
-      return;
-    }
-    if (!selectedAssets.length) {
-      setFormError("Select at least one asset");
-      return;
-    }
-    if (!selectedViews.length) {
-      setFormError("Select at least one view");
-      return;
-    }
-    const payload: RunSelection = {
-      note,
-      mode,
-      garmentId,
-      fabrics: selectedFabrics,
-      assets: selectedAssets,
-      views: selectedViews,
-      saveDebugFiles,
-    };
-    const formData = new FormData();
-    formData.append("intent", "create-run");
-    formData.append("payload", JSON.stringify(payload));
-    fetcher.submit(formData, { method: "post" });
-  };
-
-  return (
-    <Modal
-      opened={opened}
-      onClose={onClose}
-      title="New Run"
-      size="lg"
-      centered
-      overflow="inside"
-    >
-      <Stack gap="md">
-        <Select
-          label="Mode"
-          placeholder="Select a mode"
-          data={modeOptions}
-          value={mode || null}
-          onChange={(value) => setMode(value ?? "")}
-          disabled={!modeOptions.length}
-          withinPortal={false}
-        />
-        <Select
-          label="Garment"
-          placeholder="Select a garment"
-          data={garmentOptions}
-          value={garmentId || null}
-          onChange={(value) => setGarmentId(value ?? "")}
-          disabled={!garmentOptions.length}
-          withinPortal={false}
-        />
-        <MultiSelect
-          label="Fabrics"
-          data={fabricOptions}
-          value={selectedFabrics}
-          onChange={setSelectedFabrics}
-          searchable
-          placeholder="Select fabrics"
-          disabled={!fabricOptions.length}
-          withinPortal={false}
-        />
-        <MultiSelect
-          label="Views"
-          data={viewOptions}
-          value={selectedViews}
-          onChange={setSelectedViews}
-          searchable
-          placeholder={garment ? "Select views" : "Select a garment first"}
-          disabled={!garment || !viewOptions.length}
-          withinPortal={false}
-        />
-        <MultiSelect
-          label="Assets"
-          data={assetOptions}
-          value={selectedAssets}
-          onChange={setSelectedAssets}
-          searchable
-          placeholder={garment ? "Select assets" : "Select a garment first"}
-          disabled={!garment || !assetOptions.length}
-          withinPortal={false}
-        />
-        <Textarea
-          label="Operator Note"
-          placeholder="Optional context for this run"
-          minRows={2}
-          value={note}
-          onChange={(event) => setNote(event.currentTarget.value)}
-        />
-        <Switch
-          label="Save debug files"
-          checked={saveDebugFiles}
-          onChange={(event) => setSaveDebugFiles(event.currentTarget.checked)}
-        />
-        <Text size="sm" c="dimmed">
-          Estimated combinations: {estimatedJobs || "—"}
-        </Text>
-        {errorMessage && (
-          <Alert
-            color="red"
-            title="Unable to create run"
-            icon={<IconInfoCircle size={16} />}
-          >
-            {errorMessage}
-          </Alert>
-        )}
-        <Divider />
-        <Group justify="space-between">
-          <Button variant="default" onClick={onClose} disabled={isSubmitting}>
-            Cancel
-          </Button>
-          <Button
-            color="grape"
-            onClick={handleSubmit}
-            loading={isSubmitting}
-            disabled={isSubmitting}
-          >
-            Create Run
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
   );
 }
 

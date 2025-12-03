@@ -124,13 +124,17 @@ export type RunFormOptions = {
   fabrics: FabricOption[];
 };
 
-export type RunSelection = {
-  note?: string;
-  mode?: string;
-  garmentId?: string;
+export type RunGarmentSelection = {
+  garmentId: string;
   fabrics?: string[];
   assets?: string[];
   views?: string[];
+};
+
+export type RunSelection = {
+  note: string;
+  mode: string;
+  garments: RunGarmentSelection[];
   saveDebugFiles?: boolean;
 };
 
@@ -310,15 +314,15 @@ function uniqueList(values: string[]): string[] {
     new Set(values.map((value) => value.trim()).filter(Boolean))
   );
 }
-
-function resolveSelection<T>(input: T[], fallback: T[]): T[] {
-  if (!input || input.length === 0) return fallback;
-  return input;
-}
-
-function buildPlan(
+function buildPlanForGarment(
   garment: GarmentOption,
-  selection: Required<RunSelection>
+  selection: {
+    mode: string;
+    fabrics: string[];
+    assets: string[];
+    views: string[];
+    saveDebugFiles: boolean;
+  }
 ): PlanItem[] {
   const viewOrder = garment.views.map((view) => view.code);
   const viewLookup = new Map(garment.views.map((view) => [view.code, view]));
@@ -441,7 +445,7 @@ async function readArtifact(
 }
 
 async function collectConfigArtifacts(
-  garmentId: string,
+  garmentIds: string[],
   fabrics: string[]
 ): Promise<RunArtifact[]> {
   const artifacts: RunArtifact[] = [];
@@ -453,13 +457,15 @@ async function collectConfigArtifacts(
     artifacts.push(renderConfig);
   }
 
-  const garmentPath = path.join(GARMENTS_DIR, garmentId);
-  const garmentArtifact = await readArtifact(
-    garmentPath,
-    `configs/garments/${garmentId}`
-  );
-  if (garmentArtifact) {
-    artifacts.push(garmentArtifact);
+  for (const garmentId of garmentIds) {
+    const garmentPath = path.join(GARMENTS_DIR, garmentId);
+    const garmentArtifact = await readArtifact(
+      garmentPath,
+      `configs/garments/${garmentId}`
+    );
+    if (garmentArtifact) {
+      artifacts.push(garmentArtifact);
+    }
   }
 
   for (const fabricId of fabrics) {
@@ -506,68 +512,91 @@ async function uploadArtifacts(runId: string, files: RunArtifact[]) {
 
 export async function createRunFromSelection(selection: RunSelection) {
   const options = await loadRunFormOptions();
-  const mode = selection.mode?.trim();
+  const payload = selection as Partial<RunSelection>;
+  const mode =
+    typeof payload.mode === "string" ? payload.mode.trim() : "";
   if (!mode) {
     throw new Error("Mode is required");
   }
-  const garmentId = selection.garmentId?.trim();
-  if (!garmentId) {
-    throw new Error("Garment is required");
+  const note =
+    typeof payload.note === "string" ? payload.note.trim() : "";
+  if (!note) {
+    throw new Error("Operator note is required");
   }
-  const garment = options.garments.find((item) => item.id === garmentId);
-  if (!garment) {
-    throw new Error("Selected garment is not available");
-  }
-  if (!garment.assets.length) {
-    throw new Error("Selected garment does not define any assets");
+  const garmentSelections = Array.isArray(payload.garments)
+    ? payload.garments
+    : [];
+  if (!garmentSelections.length) {
+    throw new Error("Select at least one garment");
   }
 
-  const fabrics = uniqueList(
-    resolveSelection(
-      selection.fabrics ?? [],
-      options.fabrics.map((f) => f.id)
-    )
-  );
-  if (!fabrics.length) {
-    throw new Error("Select at least one fabric");
-  }
-  fabrics.forEach((fabric) => {
-    if (!options.fabrics.some((entry) => entry.id === fabric)) {
-      throw new Error(`Fabric '${fabric}' is not available`);
+  const garmentMap = new Map(options.garments.map((item) => [item.id, item]));
+  const seenGarments = new Set<string>();
+  const normalizedGarments: {
+    garment: GarmentOption;
+    fabrics: string[];
+    assets: string[];
+    views: string[];
+  }[] = [];
+
+  for (const entry of garmentSelections) {
+    const garmentId = entry.garmentId?.trim();
+    if (!garmentId) {
+      throw new Error("Garment selection is missing an id");
     }
-  });
+    if (seenGarments.has(garmentId)) {
+      throw new Error(`Garment '${garmentId}' was included more than once`);
+    }
+    seenGarments.add(garmentId);
+    const garment = garmentMap.get(garmentId);
+    if (!garment) {
+      throw new Error(`Garment '${garmentId}' is not available`);
+    }
+    if (!garment.assets.length) {
+      throw new Error(`Garment '${garment.name}' does not define assets`);
+    }
 
-  const assets = uniqueList(
-    resolveSelection(
-      selection.assets ?? [],
-      garment.assets.map((asset) => asset.name)
-    )
-  );
-  if (!assets.length) {
-    throw new Error("Select at least one asset");
+    const fabrics = uniqueList(entry.fabrics ?? []);
+    if (!fabrics.length) {
+      throw new Error(
+        `Select at least one fabric for garment '${garment.name}'`
+      );
+    }
+    fabrics.forEach((fabric) => {
+      if (!options.fabrics.some((item) => item.id === fabric)) {
+        throw new Error(`Fabric '${fabric}' is not available`);
+      }
+    });
+
+    const assets = uniqueList(entry.assets ?? []);
+    if (!assets.length) {
+      throw new Error(
+        `Select at least one asset for garment '${garment.name}'`
+      );
+    }
+
+    const views = uniqueList(entry.views ?? []);
+    if (!views.length) {
+      throw new Error(
+        `Select at least one view for garment '${garment.name}'`
+      );
+    }
+
+    normalizedGarments.push({ garment, fabrics, assets, views });
   }
 
-  const views = uniqueList(
-    resolveSelection(
-      selection.views ?? [],
-      garment.views.map((view) => view.code)
-    )
-  );
-  if (!views.length) {
-    throw new Error("Select at least one view");
+  const plan: PlanItem[] = [];
+  for (const selectionEntry of normalizedGarments) {
+    plan.push(
+      ...buildPlanForGarment(selectionEntry.garment, {
+        mode,
+        fabrics: selectionEntry.fabrics,
+        assets: selectionEntry.assets,
+        views: selectionEntry.views,
+        saveDebugFiles: Boolean(payload.saveDebugFiles),
+      })
+    );
   }
-
-  const normalizedSelection: Required<RunSelection> = {
-    mode,
-    garmentId,
-    fabrics,
-    assets,
-    views,
-    note: selection.note ?? "",
-    saveDebugFiles: Boolean(selection.saveDebugFiles),
-  };
-
-  const plan = buildPlan(garment, normalizedSelection);
   if (!plan.length) {
     throw new Error("No render combinations were generated");
   }
@@ -585,27 +614,42 @@ export async function createRunFromSelection(selection: RunSelection) {
   const hostname = os.hostname();
   const gitCommit = await readGitCommit();
 
+  const selectedGarmentIds = normalizedGarments.map(
+    (entry) => entry.garment.id
+  );
+  const garmentNames = normalizedGarments.map((entry) => entry.garment.name);
+  const allFabrics = new Set<string>();
+  const allAssets = new Set<string>();
+  const allViews = new Set<string>();
+  normalizedGarments.forEach((entry) => {
+    entry.fabrics.forEach((fabric) => allFabrics.add(fabric));
+    entry.assets.forEach((asset) => allAssets.add(asset));
+    entry.views.forEach((view) => allViews.add(view));
+  });
+  const fabricList = [...allFabrics].sort();
+  const assetList = [...allAssets].sort();
+  const viewList = [...allViews].sort();
+
   const metadata = {
     run_id: runId,
     created_at: createdAt,
     created_by: createdBy,
     host: hostname,
     git_commit: gitCommit,
-    note: normalizedSelection.note?.trim() || "",
+    note,
     mode,
-    garment: garmentId,
-    fabrics: [...fabrics].sort(),
-    assets: [...assets].sort(),
-    views: [...views].sort(),
+    garment: garmentNames.join(", "),
+    garments: selectedGarmentIds,
+    fabrics: fabricList,
+    assets: assetList,
+    views: viewList,
     total_jobs: plan.length,
     status: "pending",
   };
 
   const jobs = buildJobRecords(runId, plan);
 
-  const notesBody = normalizedSelection.note?.trim()
-    ? normalizedSelection.note.trim()
-    : "(no notes provided)";
+  const notesBody = note || "(no notes provided)";
 
   const files: RunArtifact[] = [
     {
@@ -635,7 +679,10 @@ export async function createRunFromSelection(selection: RunSelection) {
     },
   ];
 
-  const configArtifacts = await collectConfigArtifacts(garmentId, fabrics);
+  const configArtifacts = await collectConfigArtifacts(
+    selectedGarmentIds,
+    fabricList
+  );
   files.push(...configArtifacts);
 
   await writeArtifactsToRunDir(runPath, files);
