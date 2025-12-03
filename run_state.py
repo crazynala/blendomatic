@@ -9,7 +9,7 @@ from path_utils import RUNS_DIR
 
 STATE_PATH = RUNS_DIR / "state.json"
 DEFAULT_PRIORITY = 100
-_STATE_LOCK = threading.Lock()
+_STATE_LOCK = threading.RLock()
 
 
 def _coerce_run_id(run_id: str) -> int:

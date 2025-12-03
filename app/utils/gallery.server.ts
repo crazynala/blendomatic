@@ -7,6 +7,8 @@ import {
   LAYER_PRIORITY,
   type ConfigOptions,
 } from "./config-options";
+import type { RunJobRecord } from "./run-store.server";
+import { buildAssetPublicUrl } from "./asset-urls.server";
 
 type AssetMeta = {
   suffix: string;
@@ -83,7 +85,6 @@ type SuffixMatch = {
 };
 
 const ROOT_DIR = process.cwd();
-const RENDERS_DIR = path.join(ROOT_DIR, "renders");
 const GARMENTS_DIR = path.join(ROOT_DIR, "garments");
 const FABRICS_DIR = path.join(ROOT_DIR, "fabrics");
 

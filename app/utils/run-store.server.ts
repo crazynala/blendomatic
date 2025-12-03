@@ -20,6 +20,13 @@ export type RunJobConfig = {
   [key: string]: unknown;
 };
 
+export type RunJobResult = {
+  output_path?: string | null;
+  uploaded?: string | null;
+  thumbnail?: string | null;
+  [key: string]: unknown;
+} | null;
+
 export type RunJobRecord = {
   jobId: string;
   sequence?: number;
@@ -29,6 +36,7 @@ export type RunJobRecord = {
   finishedAt?: string | null;
   updatedAt?: string | null;
   config?: RunJobConfig;
+  result?: RunJobResult;
 };
 
 export type RunSummary = {
@@ -77,6 +85,7 @@ type JobFileRecord = {
   finished_at?: string | null;
   updated_at?: string | null;
   config?: RunJobConfig;
+  result?: RunJobResult;
 };
 
 const RUNS_ROOT =
@@ -148,6 +157,7 @@ function normalizeJob(record: JobFileRecord): RunJobRecord {
     finishedAt: record.finished_at,
     updatedAt: record.updated_at,
     config: record.config ?? {},
+    result: record.result ?? null,
   };
 }
 

@@ -7,8 +7,10 @@ import json
 import os
 import signal
 import sys
+import threading
+import time
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, TextIO
 from datetime import datetime, timezone
 
 try:
@@ -598,7 +600,7 @@ class BlenderTUIApp(App):
         self.worker_poll_task: Optional[asyncio.Task] = None
         self.worker_listing_enabled: bool = False
         self.worker_runner: Optional[WorkerRunner] = None
-        self.worker_runner_task: Optional[asyncio.Task] = None
+        self.worker_runner_thread: Optional[threading.Thread] = None
         self.worker_runner_store: Optional[str] = None
         self._child_status_text: str = "🧒 Client mode idle - waiting for jobs"
         self._is_shutting_down: bool = False
@@ -657,6 +659,13 @@ class BlenderTUIApp(App):
                 self._worker_log_sink_active = True
             except Exception as sink_exc:
                 print(f"[TUI] Failed to attach worker log sink: {sink_exc}", flush=True)
+
+        # Persistent TUI session log
+        self.tui_log_dir: Optional[Path] = None
+        self.tui_log_file_path: Optional[Path] = None
+        self._tui_log_handle: Optional[TextIO] = None
+        self._tui_log_lock = threading.Lock()
+        self._initialize_tui_log_file()
     
     def _load_json_file(self, file_path: Path) -> Dict[str, Any]:
         """Load a JSON file safely"""
@@ -1148,6 +1157,8 @@ class BlenderTUIApp(App):
     async def on_mount(self):
         """Initialize the session when app starts"""
         self.write_message("🚀 Initializing Blender TUI...")
+        if self.tui_log_file_path:
+            self.write_message(f"📝 Session log: {self.tui_log_file_path}")
         self._update_record_run_controls()
         self._update_node_mode_ui()
         # Log Textual version and consolidated modal support for diagnostics
@@ -1216,28 +1227,98 @@ class BlenderTUIApp(App):
     async def on_shutdown(self) -> None:
         """Mark shutdown so background log writes don't touch dead widgets."""
         self._is_shutting_down = True
+        self._close_tui_log_file()
         try:
             await super().on_shutdown()
         except AttributeError:
             pass
+
+    def _initialize_tui_log_file(self) -> None:
+        """Create a timestamped log file alongside Blender logs."""
+        try:
+            project_root = Path(__file__).parent.resolve()
+            logs_root = project_root / "logs"
+            date_dir = datetime.now().strftime("%Y-%m-%d")
+            log_dir = logs_root / date_dir
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_path = log_dir / f"tui_{timestamp}.log"
+            handle = log_path.open("a", encoding="utf-8")
+
+            self.tui_log_dir = log_dir
+            self.tui_log_file_path = log_path
+            self._tui_log_handle = handle
+            self._persist_tui_log_line("=== Blendomatic TUI session started ===")
+        except Exception as exc:
+            self.tui_log_dir = None
+            self.tui_log_file_path = None
+            self._tui_log_handle = None
+            print(f"[TUI] Failed to initialize session log: {exc}", flush=True)
+
+    def _persist_tui_log_line(self, message: str) -> None:
+        """Append a single line to the session log if available."""
+        handle = self._tui_log_handle
+        if not handle:
+            return
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        line = f"{timestamp} UTC | {message}\n"
+        try:
+            with self._tui_log_lock:
+                handle.write(line)
+                handle.flush()
+        except Exception as exc:
+            self._tui_log_handle = None
+            print(f"[TUI] Failed to write session log entry: {exc}", flush=True)
+
+    def _close_tui_log_file(self) -> None:
+        """Flush and close the session log."""
+        handle = self._tui_log_handle
+        if not handle:
+            return
+
+        self._persist_tui_log_line("=== Blendomatic TUI session shutting down ===")
+        with self._tui_log_lock:
+            try:
+                handle.close()
+            except Exception:
+                pass
+        self._tui_log_handle = None
     
     def write_message(self, message: str):
-        """Write message to the message display (avoiding 'log' method name)"""
-        if not self._is_shutting_down and self.message_display:
+        """Write message to the message display (avoiding 'log' method name)."""
+        self._persist_tui_log_line(message)
+
+        def _append_to_display() -> None:
+            if self._is_shutting_down or not self.message_display:
+                return
             try:
                 self.message_display.write_line(message)
             except NoActiveAppError:
-                self._is_shutting_down = True
+                # Textual not ready yet; drop just this write but keep future ones
+                pass
             except Exception:
                 pass
+
+        # Route cross-thread writes through Textual's thread-safe helper
+        if threading.current_thread() is threading.main_thread():
+            _append_to_display()
+        else:
+            try:
+                self.call_from_thread(_append_to_display)
+            except Exception:
+                pass
+
         # Also use Textual's built-in logging properly
-        if not self._is_shutting_down and hasattr(self, 'log') and hasattr(self.log, 'info'):
+        if hasattr(self, 'log') and hasattr(self.log, 'info'):
             try:
                 self.log.info(message)
             except NoActiveAppError:
-                self._is_shutting_down = True
+                pass
             except Exception:
                 pass
+
         print(message, flush=True)
 
     def _handle_worker_registry_log(self, message: str) -> None:
@@ -1842,6 +1923,14 @@ class BlenderTUIApp(App):
             error = payload.get("error") or "unknown error"
             message = f"⚠️ Client runner error: {error}"
             banner = f"⚠️ Client error: {error}"
+        elif event == "runner-debug":
+            detail = payload.get("message") or "(no details)"
+            extra: List[str] = []
+            for key in ("run_id", "pending", "total"):
+                if key in payload and payload[key] is not None:
+                    extra.append(f"{key}={payload[key]}")
+            suffix = f" ({', '.join(extra)})" if extra else ""
+            message = f"🛠 Client debug: {detail}{suffix}"
         elif event == "stopped":
             reason = payload.get("reason") or "stopped"
             message = f"🛑 Client worker stopped ({reason})"
@@ -1851,24 +1940,31 @@ class BlenderTUIApp(App):
         if banner:
             self._set_child_status_text(banner)
 
-    async def _run_worker_runner(self, runner: WorkerRunner) -> None:
-        loop = asyncio.get_running_loop()
+    def _worker_runner_loop(self, runner: WorkerRunner, loop: asyncio.AbstractEventLoop) -> None:
         try:
-            await loop.run_in_executor(None, runner.run)
-        except asyncio.CancelledError:
-            runner.stop()
-            raise
+            runner.run()
         except Exception as exc:
-            self.write_message(f"⚠️ Client worker crashed: {exc}")
-            self._handle_worker_runner_event("stopped", {"reason": "error", "error": str(exc)})
+            try:
+                loop.call_soon_threadsafe(self._on_worker_runner_error, exc)
+            except RuntimeError:
+                pass
         finally:
-            if self.worker_runner is runner:
-                self.worker_runner = None
-            self.worker_runner_task = None
-            self._set_child_status_text("🧒 Client mode idle - waiting for jobs")
+            try:
+                loop.call_soon_threadsafe(self._on_worker_runner_thread_finished, runner)
+            except RuntimeError:
+                pass
+
+    def _on_worker_runner_error(self, exc: Exception) -> None:
+        self.write_message(f"⚠️ Client worker crashed: {exc}")
+        self._handle_worker_runner_event("stopped", {"reason": "error", "error": str(exc)})
+
+    def _on_worker_runner_thread_finished(self, runner: WorkerRunner) -> None:
+        self.worker_runner = None
+        self.worker_runner_thread = None
+        self._set_child_status_text("🧒 Client mode idle - waiting for jobs")
 
     async def _start_worker_client(self) -> None:
-        if self.worker_runner_task or self.worker_runner:
+        if self.worker_runner_thread or self.worker_runner:
             return
         self._set_child_status_text("🧒 Starting client worker…")
         self.write_message("🧒 Starting client worker…")
@@ -1898,28 +1994,34 @@ class BlenderTUIApp(App):
             status_callback=_status_callback,
         )
         self.worker_runner = runner
-        self.worker_runner_task = asyncio.create_task(self._run_worker_runner(runner))
+        thread = threading.Thread(
+            target=self._worker_runner_loop,
+            args=(runner, loop),
+            name="blendomatic-worker-runner",
+            daemon=True,
+        )
+        self.worker_runner_thread = thread
+        thread.start()
         if self.worker_runner_store:
             self.write_message(f"🧒 Client worker using store {self.worker_runner_store}")
 
     async def _stop_worker_client(self) -> None:
-        task = self.worker_runner_task
         runner = self.worker_runner
-        if not task:
+        thread = self.worker_runner_thread
+        if not runner and not thread:
             return
         self.write_message("🛑 Stopping client worker…")
         if runner:
             runner.stop()
-        try:
-            await asyncio.wait_for(task, timeout=10.0)
-        except asyncio.TimeoutError:
-            self.write_message("⚠️ Client worker still stopping; shutting down in background")
-        except asyncio.CancelledError:
-            pass
-        finally:
-            self.worker_runner = None
-            self.worker_runner_task = None
-            self._set_child_status_text("🧒 Client mode idle - waiting for jobs")
+        if thread:
+            deadline = time.time() + 10.0
+            while thread.is_alive() and time.time() < deadline:
+                thread.join(timeout=0.2)
+            if thread.is_alive():
+                self.write_message("⚠️ Client worker still stopping; shutting down in background")
+            else:
+                self.worker_runner_thread = None
+        self.worker_runner = None
 
     async def _ensure_worker_runner(self) -> None:
         if self.node_mode == "child":
@@ -2444,21 +2546,30 @@ def main():
     else:
         blender_path = "blender"
     
-    # Add signal handler for graceful shutdown
+    app = BlenderTUIApp(blender_path)
+
+    stop_requested = threading.Event()
+
     def signal_handler(signum, frame):
+        if stop_requested.is_set():
+            print("\n⚠️ Force quitting...")
+            os._exit(1)
+        stop_requested.set()
         print("\n🛑 Interrupt received, shutting down...")
-        sys.exit(0)
+        try:
+            app.call_from_thread(app.exit)
+        except Exception:
+            pass
     
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
     # Run the app with proper error handling
     try:
-        app = BlenderTUIApp(blender_path)
         app.run()
     except KeyboardInterrupt:
         print("\n🛑 Interrupted by user")
-        sys.exit(0)
+        return
     except Exception as e:
         print(f"\n❌ TUI error: {e}")
         print("This may happen due to terminal compatibility issues.")

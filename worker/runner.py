@@ -28,6 +28,11 @@ except Exception:  # pragma: no cover - boto3 not always installed locally
     boto3 = None  # type: ignore
     ClientError = Exception  # type: ignore
 
+try:  # Thumbnail generation (optional fallback for local dev)
+    from PIL import Image
+except Exception:  # pragma: no cover - pillow optional until installed
+    Image = None  # type: ignore
+
 LOGGER = logging.getLogger("worker")
 STORE_ENV = "BLENDOMATIC_RUN_STORE"
 STORE_FALLBACK_ENV = "BLENDOMATIC_S3_STORE"
@@ -70,6 +75,9 @@ class RunStore:
     def upload_output(self, run_id: str, source: Path) -> Optional[str]:
         raise NotImplementedError
 
+    def upload_thumbnail(self, run_id: str, source: Path) -> Optional[str]:
+        raise NotImplementedError
+
     def describe(self) -> str:
         raise NotImplementedError
 
@@ -110,6 +118,13 @@ class LocalRunStore(RunStore):
 
     def upload_output(self, run_id: str, source: Path) -> Optional[str]:
         target_dir = self._run_dir(run_id) / "outputs"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / source.name
+        shutil.copy2(source, target)
+        return str(target)
+
+    def upload_thumbnail(self, run_id: str, source: Path) -> Optional[str]:
+        target_dir = self._run_dir(run_id) / "thumbnails"
         target_dir.mkdir(parents=True, exist_ok=True)
         target = target_dir / source.name
         shutil.copy2(source, target)
@@ -220,6 +235,18 @@ class S3RunStore(RunStore):
         )
         return f"s3://{self.bucket}/{key}"
 
+    def upload_thumbnail(self, run_id: str, source: Path) -> Optional[str]:
+        key = f"{self._run_prefix(run_id)}/thumbnails/{source.name}"
+        content_type, _ = mimetypes.guess_type(source.name)
+        extra_args = {"ContentType": content_type or "image/jpeg"}
+        self.client.upload_file(
+            Filename=str(source),
+            Bucket=self.bucket,
+            Key=key,
+            ExtraArgs=extra_args,
+        )
+        return f"s3://{self.bucket}/{key}"
+
 
 def ensure_cache_root(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
@@ -322,6 +349,32 @@ class WorkerRunner:
         except Exception:
             pass
 
+    def _debug(self, message: str, **payload: Any) -> None:
+        try:
+            self.logger.debug(message)
+        except Exception:
+            pass
+        details = dict(payload)
+        details["message"] = message
+        self._emit("runner-debug", **details)
+
+    def _generate_thumbnail(self, source: Path) -> Optional[Path]:
+        if Image is None:
+            self._log("Pillow not installed; skipping thumbnail for %s", source)
+            return None
+        if not source.exists():
+            return None
+        thumb_path = source.with_name(f"{source.stem}_thumb.jpg")
+        try:
+            with Image.open(source) as image:
+                image = image.convert("RGB")
+                image.thumbnail((512, 512), Image.LANCZOS)
+                image.save(thumb_path, format="JPEG", quality=85, optimize=True)
+            return thumb_path
+        except Exception as exc:
+            self._log("Failed to generate thumbnail for %s: %s", source, exc)
+            return None
+
     def _emit(self, event: str, **payload: Any) -> None:
         if not self.status_callback:
             return
@@ -352,11 +405,17 @@ class WorkerRunner:
 
     def _claim_next_job(self) -> Optional[ClaimedJob]:
         run_ids = self.store.list_run_ids()
+        self._debug(
+            "Scanning runs",
+            run_ids=list(run_ids),
+            preferred=self.preferred_run,
+        )
         ordered = prioritize_runs(run_ids, self.preferred_run)
         for run_id in ordered:
             claimed = self._claim_from_run(run_id)
             if claimed:
                 return claimed
+        self._debug("No claimable jobs found across runs", run_ids=list(run_ids))
         return None
 
     def _claim_from_run(self, run_id: str) -> Optional[ClaimedJob]:
@@ -365,6 +424,19 @@ class WorkerRunner:
         except Exception as exc:
             self._log("Failed to load jobs for run %s: %s", run_id, exc)
             return None
+
+        total = len(jobs)
+        pending = sum(1 for job in jobs if (job.get("status") or "").lower() == "pending")
+        running = sum(1 for job in jobs if (job.get("status") or "").lower() == "running")
+        completed = sum(1 for job in jobs if (job.get("status") or "").lower() == "completed")
+        self._debug(
+            f"Run {run_id}: total={total}, pending={pending}, running={running}, completed={completed}",
+            run_id=run_id,
+            total=total,
+            pending=pending,
+            running=running,
+            completed=completed,
+        )
 
         jobs_sorted = sorted(
             jobs,
@@ -378,9 +450,18 @@ class WorkerRunner:
                 continue
             updated = self._transition_job(run_id, job, "pending", "running")
             if not updated:
+                self._debug(
+                    f"Job {job.get('job_id')} no longer pending when claiming",
+                    run_id=run_id,
+                    job_id=job.get("job_id"),
+                )
                 continue
             cache_path = self.store.ensure_run_cache(run_id, self.cache_root)
             return ClaimedJob(run_id=run_id, job=updated, cache_path=cache_path)
+        self._debug(
+            f"Run {run_id}: no pending jobs available after scan",
+            run_id=run_id,
+        )
         return None
 
     def _transition_job(
@@ -406,6 +487,13 @@ class WorkerRunner:
                 updated_jobs.append(entry)
                 continue
             if (entry.get("status") or "").lower() != expected_status:
+                self._debug(
+                    f"Job {job_id} status mismatch (expected {expected_status}, found {entry.get('status')})",
+                    run_id=run_id,
+                    job_id=job_id,
+                    expected=expected_status,
+                    found=entry.get("status"),
+                )
                 return None
             record = dict(entry)
             record["status"] = next_status
@@ -421,6 +509,11 @@ class WorkerRunner:
             changed_record = record
             updated_jobs.append(record)
         if not changed_record:
+            self._debug(
+                f"Job {job_id} not found while attempting transition",
+                run_id=run_id,
+                job_id=job_id,
+            )
             return None
         self.store.save_jobs(run_id, updated_jobs)
         return changed_record
@@ -488,10 +581,26 @@ class WorkerRunner:
         if success:
             output_path = command_result.get("result")
             uploaded = self.store.upload_output(run_id, Path(output_path)) if output_path else None
+            thumbnail_uploaded = None
+            thumbnail_path: Optional[Path] = None
+            if output_path:
+                thumbnail_path = self._generate_thumbnail(Path(output_path))
+                if thumbnail_path:
+                    try:
+                        thumbnail_uploaded = self.store.upload_thumbnail(
+                            run_id, thumbnail_path
+                        )
+                    finally:
+                        try:
+                            thumbnail_path.unlink()
+                        except Exception:
+                            pass
             result_payload = {
                 "output_path": output_path,
                 "uploaded": uploaded,
             }
+            if thumbnail_uploaded:
+                result_payload["thumbnail"] = thumbnail_uploaded
             updated = self._transition_job(
                 run_id,
                 job,
