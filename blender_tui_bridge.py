@@ -63,6 +63,8 @@ class BlenderBridge:
     Bridge that runs TUI outside Blender and communicates with Blender via files/subprocess
     """
     
+    DEFAULT_RENDER_TIMEOUT = int(os.environ.get("BLENDOMATIC_RENDER_TIMEOUT_SECONDS", "14400"))  # 4 hours
+
     def __init__(self, blender_executable="blender"):
         self.blender_exe = blender_executable
         self.temp_dir = Path(tempfile.mkdtemp(prefix="blendomatic_"))
@@ -382,7 +384,7 @@ except Exception as e:
                 # Check if synchronous execution is requested
                 force_sync = args.get('force_synchronous', False)
                 if force_sync:
-                    timeout = args.get('timeout_seconds', 3600)  # Default 1 hour for renders
+                    timeout = args.get('timeout_seconds', self.DEFAULT_RENDER_TIMEOUT)
                     print(f"[BRIDGE] Force synchronous mode - timeout: {timeout} seconds")
                 else:
                     return self._execute_render_detached(cmd, command, args)

@@ -6,6 +6,8 @@ import { exec as execCallback } from "node:child_process";
 import { promisify } from "node:util";
 import {
   S3Client,
+  ListObjectsV2Command,
+  GetObjectCommand,
   PutObjectCommand,
   type PutObjectCommandInput,
 } from "@aws-sdk/client-s3";
@@ -136,6 +138,7 @@ export type RunSelection = {
   mode: string;
   garments: RunGarmentSelection[];
   saveDebugFiles?: boolean;
+  runNumber?: number | string | null;
 };
 
 type PlanItem = {
@@ -403,22 +406,147 @@ async function scanHighestRunId(): Promise<number> {
   return highest;
 }
 
-async function allocateRunId(width = 4): Promise<string> {
-  await ensureRunsDir();
-  let current = 0;
+async function readLocalCounter(): Promise<number | null> {
   try {
     const raw = await fs.readFile(COUNTER_PATH, "utf-8");
-    current = Number(raw.trim()) || 0;
+    return Number(raw.trim()) || 0;
   } catch (error: any) {
     if (error?.code === "ENOENT") {
-      current = await scanHighestRunId();
-    } else {
-      throw error;
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function readS3Counter(): Promise<number | null> {
+  if (!s3Client || !bucket || !runsBaseKey) return null;
+  const key = `${runsBaseKey.replace(/\/+$/u, "")}/.counter`;
+  try {
+    const { Body } = await s3Client.send(
+      new GetObjectCommand({ Bucket: bucket, Key: key })
+    );
+    if (Body && "transformToString" in Body) {
+      const text = await (Body as any).transformToString();
+      const parsed = Number(String(text).trim());
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+  } catch (error: any) {
+    if (error?.$metadata?.httpStatusCode === 404) {
+      return null;
+    }
+    return null;
+  }
+  return null;
+}
+
+async function writeS3Counter(value: number) {
+  if (!s3Client || !bucket || !runsBaseKey) return;
+  const key = `${runsBaseKey.replace(/\/+$/u, "")}/.counter`;
+  await s3Client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: String(value),
+      ContentType: "text/plain",
+    })
+  );
+}
+
+async function scanHighestS3RunId(): Promise<number> {
+  if (!s3Client || !bucket || !runsBaseKey) return 0;
+  const prefix = `${runsBaseKey.replace(/\/+$/u, "")}/`;
+  let highest = 0;
+  const result = await s3Client.send(
+    new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix })
+  );
+  for (const obj of result.Contents ?? []) {
+    const key = obj.Key ?? "";
+    const suffix = key.slice(prefix.length);
+    const runId = suffix.split("/", 1)[0];
+    if (/^\d+$/.test(runId)) {
+      highest = Math.max(highest, Number(runId));
     }
   }
-  const nextValue = current + 1;
+  return highest;
+}
+
+async function runExists(runId: string): Promise<boolean> {
+  const localPath = path.join(RUNS_DIR, runId);
+  try {
+    const stat = await fs.stat(localPath);
+    if (stat.isDirectory()) return true;
+  } catch {
+    // ignore
+  }
+  if (s3Client && bucket && runsBaseKey) {
+    const prefix = `${runsBaseKey.replace(/\/+$/u, "")}/${runId}/`;
+    const result = await s3Client.send(
+      new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, MaxKeys: 1 })
+    );
+    if ((result.KeyCount ?? 0) > 0 || (result.Contents ?? []).length) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function normalizeRunNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed =
+    typeof value === "string" ? Number(value.trim()) : Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error("Run number must be a positive integer");
+  }
+  return parsed;
+}
+
+async function currentRunFloor(): Promise<number> {
+  const candidates: number[] = [];
+
+  const s3Counter = await readS3Counter();
+  if (s3Counter !== null) candidates.push(s3Counter);
+  const s3Highest = await scanHighestS3RunId();
+  if (s3Highest) candidates.push(s3Highest);
+
+  const localCounter = await readLocalCounter();
+  if (localCounter !== null) candidates.push(localCounter);
+  const localHighest = await scanHighestRunId();
+  if (localHighest) candidates.push(localHighest);
+
+  return candidates.length ? Math.max(...candidates) : 0;
+}
+
+async function allocateRunId(width = 4, requested?: number | null): Promise<string> {
+  await ensureRunsDir();
+  const floor = await currentRunFloor();
+
+  if (requested !== null && requested !== undefined) {
+    if (!Number.isInteger(requested) || requested < 1) {
+      throw new Error("Run number must be a positive integer");
+    }
+    if (requested <= floor) {
+      throw new Error(
+        `Run ${String(requested).padStart(width, "0")} already exists or was used`
+      );
+    }
+  }
+
+  const nextValue =
+    requested !== null && requested !== undefined ? requested : floor + 1;
+
   await fs.writeFile(COUNTER_PATH, String(nextValue), "utf-8");
+  await writeS3Counter(nextValue);
   return String(nextValue).padStart(width, "0");
+}
+
+export async function getExpectedRunNumber(
+  width = 4
+): Promise<{ numeric: number; padded: string }> {
+  await ensureRunsDir();
+  const floor = await currentRunFloor();
+  const nextValue = floor + 1;
+  const padded = String(nextValue).padStart(width, "0");
+  return { numeric: nextValue, padded };
 }
 
 async function readGitCommit(): Promise<string | null> {
@@ -601,7 +729,15 @@ export async function createRunFromSelection(selection: RunSelection) {
     throw new Error("No render combinations were generated");
   }
 
-  const runId = await allocateRunId();
+  const requestedRunNumber = normalizeRunNumber(payload.runNumber);
+  if (requestedRunNumber) {
+    const requestedRunId = String(requestedRunNumber).padStart(4, "0");
+    if (await runExists(requestedRunId)) {
+      throw new Error(`Run ${requestedRunId} already exists in the run store`);
+    }
+  }
+
+  const runId = await allocateRunId(4, requestedRunNumber);
   const runPath = path.join(RUNS_DIR, runId);
   await fs.mkdir(runPath, { recursive: true });
 

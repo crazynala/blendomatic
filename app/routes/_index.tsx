@@ -1,11 +1,17 @@
 import { json } from "@remix-run/node";
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData, useNavigate, useSearchParams } from "@remix-run/react";
+import {
+  Link,
+  useLoaderData,
+  useNavigate,
+  useSearchParams,
+} from "@remix-run/react";
 import {
   ActionIcon,
   Alert,
   Badge,
   Box,
+  Button,
   Card,
   Container,
   Divider,
@@ -88,9 +94,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const renderFolder = selectedRun
     ? deriveRenderFolder(selectedRun.createdAt ?? selectedRun.lastActivity)
     : null;
-  const runDetail = selectedRun
-    ? await getRunDetail(selectedRun.runId)
-    : null;
+  const runDetail = selectedRun ? await getRunDetail(selectedRun.runId) : null;
   const galleryData = await describeRenders(
     selectedRun?.mode ?? null,
     renderFolder,
@@ -229,11 +233,15 @@ export default function GalleryRoute() {
     });
     return ordered.map((entry) => {
       const fabricOrder = fabricOrderByGarment.get(entry.garmentId) ?? [];
-      const fabricMap = new Map(entry.fabrics.map((fabric) => [fabric.key, fabric]));
+      const fabricMap = new Map(
+        entry.fabrics.map((fabric) => [fabric.key, fabric])
+      );
       const orderedFabrics = [
         ...fabricOrder
           .map((key) => fabricMap.get(key))
-          .filter((fabric): fabric is NonNullable<typeof fabric> => Boolean(fabric)),
+          .filter((fabric): fabric is NonNullable<typeof fabric> =>
+            Boolean(fabric)
+          ),
         ...entry.fabrics.filter((fabric) => !fabricOrder.includes(fabric.key)),
       ];
       return { ...entry, fabrics: orderedFabrics };
@@ -324,13 +332,17 @@ export default function GalleryRoute() {
 
   const hasGalleryContent = sortedRows.length > 0;
   const hasVisibleRows = visibleRows.length > 0;
+  const toolbarOffset = toolbarCollapsed ? 120 : 360;
 
   return (
     <Box ref={scrollContainerRef} style={{ width: "100%", overflowX: "auto" }}>
       <Container
         fluid
         py="xl"
-        style={{ minHeight: "100vh", paddingBottom: "var(--mantine-spacing-xl)" }}
+        style={{
+          minHeight: "100vh",
+          paddingBottom: "var(--mantine-spacing-xl)",
+        }}
       >
         <Stack gap="xl" style={{ width: "fit-content" }}>
           <WorkspaceNav />
@@ -349,6 +361,7 @@ export default function GalleryRoute() {
               alignItems: "flex-start",
               width: "fit-content",
               minWidth: "100%",
+              paddingLeft: toolbarOffset,
             }}
           >
             <GalleryToolbar
@@ -366,153 +379,184 @@ export default function GalleryRoute() {
               collapsed={toolbarCollapsed}
             />
             <Stack gap="xl" style={{ flex: 1, width: "fit-content" }}>
-            {selectedRun ? (
-              <Card withBorder radius="lg" padding="lg">
-                <Group justify="space-between" align="flex-start">
-                  <Stack gap={4}>
-                    <Text fw={600}>Run {selectedRun.runId}</Text>
-                    <Text size="sm" c="dimmed">
-                      Mode {selectedRun.mode ?? "—"} • Folder {renderFolder ?? "—"}
-                    </Text>
-                    <Text size="sm" c="dimmed">
-                      {selectedRun.note?.trim() || "No operator note"}
-                    </Text>
-                    <Text size="sm">
-                      {selectedRun.completedJobs}/{selectedRun.totalJobs}{" "}
-                      completed
-                    </Text>
-                  </Stack>
-                  <Badge
-                    color={
-                      runStatusColor[
-                        selectedRun.status?.toLowerCase() ?? "pending"
-                      ] ?? "gray"
-                    }
-                  >
-                    {selectedRun.status ?? "pending"}
-                  </Badge>
-                </Group>
-              </Card>
-            ) : (
-              <Alert title="No runs found" color="yellow" variant="filled">
-                There are no completed runs yet. Start a run to populate the gallery.
-              </Alert>
-            )}
-
-            {!hasGalleryContent ? (
-              <Alert title="No renders found" color="yellow" variant="filled">
-                We couldn&apos;t find any PNG outputs for this run. Try a different run once
-                additional renders are available.
-              </Alert>
-            ) : !hasVisibleRows ? (
-              <Alert
-                title="No garments match"
-                color="blue"
-                variant="light"
-                icon={<IconAlertTriangle size={18} />}
-              >
-                No garments match the current star filter. Toggle back to "All" or star more
-                garments.
-              </Alert>
-            ) : (
-              visibleRows.map((row) => (
-                <Stack
-                  key={`${row.id}-${row.viewCode}`}
-                  gap="md"
-                  style={{ width: "fit-content" }}
-                >
+              {selectedRun ? (
+                <Card withBorder radius="lg" padding="lg">
                   <Group justify="space-between" align="flex-start">
-                    <Stack gap={0}>
-                      <Text fw={700}>{row.garmentName}</Text>
+                    <Stack gap={4}>
+                      <Text fw={600}>Run {selectedRun.runId}</Text>
                       <Text size="sm" c="dimmed">
-                        View {row.viewLabel}
+                        Mode {selectedRun.mode ?? "—"} • Folder{" "}
+                        {renderFolder ?? "—"}
+                      </Text>
+                      <Text size="sm" c="dimmed">
+                        {selectedRun.note?.trim() || "No operator note"}
+                      </Text>
+                      <Text size="sm">
+                        {selectedRun.completedJobs}/{selectedRun.totalJobs}{" "}
+                        completed
                       </Text>
                     </Stack>
-                    <Badge variant="light">{row.viewLabel}</Badge>
+                    <Badge
+                      color={
+                        runStatusColor[
+                          selectedRun.status?.toLowerCase() ?? "pending"
+                        ] ?? "gray"
+                      }
+                    >
+                      {selectedRun.status ?? "pending"}
+                    </Badge>
                   </Group>
+                </Card>
+              ) : (
+                <Alert title="No runs found" color="yellow" variant="filled">
+                  There are no completed runs yet. Start a run to populate the
+                  gallery.
+                </Alert>
+              )}
 
-                  <Box
-                    style={{
-                      display: "flex",
-                      gap: "var(--mantine-spacing-md)",
-                      paddingBottom: "var(--mantine-spacing-sm)",
-                      minHeight: imageDimension + 120,
-                      width: "fit-content",
-                    }}
+              {!hasGalleryContent ? (
+                <Alert title="No renders found" color="yellow" variant="filled">
+                  We couldn&apos;t find any PNG outputs for this run. Try a
+                  different run once additional renders are available.
+                </Alert>
+              ) : !hasVisibleRows ? (
+                <Alert
+                  title="No garments match"
+                  color="blue"
+                  variant="light"
+                  icon={<IconAlertTriangle size={18} />}
+                >
+                  No garments match the current star filter. Toggle back to
+                  "All" or star more garments.
+                </Alert>
+              ) : (
+                visibleRows.map((row) => (
+                  <Stack
+                    key={`${row.id}-${row.viewCode}`}
+                    gap="md"
+                    style={{ width: "fit-content" }}
                   >
-                    {row.fabrics.map((fabric) => {
-                      const layers = computeVisibleLayers(fabric.layers);
-                      const cardId = `${row.id}-${fabric.key}`;
-                      const cardStarred = starredSet.has(cardId);
-                      return (
-                        <Card
-                          key={cardId}
-                          withBorder
-                          padding="sm"
-                          radius="md"
-                          style={{ minWidth: imageDimension + 56 }}
-                        >
-                          <Stack gap="xs">
-                            <Group justify="space-between" align="flex-start">
-                              <Stack gap={0}>
-                                <Text fw={600}>{fabric.label}</Text>
-                                <Text size="sm" c="dimmed">
-                                  Fabric
-                                </Text>
-                              </Stack>
+                    <Group justify="space-between" align="flex-start">
+                      <Stack gap={0}>
+                        <Text fw={700}>{row.garmentName}</Text>
+                        <Text size="sm" c="dimmed">
+                          View {row.viewLabel}
+                        </Text>
+                      </Stack>
+                      <Badge variant="light">{row.viewLabel}</Badge>
+                    </Group>
+
+                    <Box
+                      style={{
+                        display: "flex",
+                        gap: "var(--mantine-spacing-md)",
+                        paddingBottom: "var(--mantine-spacing-sm)",
+                        minHeight: imageDimension + 120,
+                        width: "fit-content",
+                      }}
+                    >
+                      {row.fabrics.map((fabric) => {
+                        const layers = computeVisibleLayers(fabric.layers);
+                        const cardId = `${row.id}-${fabric.key}`;
+                        const cardStarred = starredSet.has(cardId);
+                        const detailHref = `/gallery/${encodeURIComponent(
+                          cardId
+                        )}${selectedRunId ? `?run=${selectedRunId}` : ""}`;
+                        return (
+                          <Stack
+                            key={cardId}
+                            gap={6}
+                            align="flex-start"
+                            style={{ minWidth: imageDimension }}
+                          >
+                            <Text size="sm" c="dimmed" fw={600}>
+                              {fabric.label}
+                            </Text>
+                            <Card
+                              component={Link}
+                              to={detailHref}
+                              withBorder={false}
+                              padding={0}
+                              radius="md"
+                              style={{
+                                position: "relative",
+                                background: "transparent",
+                                border: "none",
+                                boxShadow: "none",
+                                cursor: "pointer",
+                                width: "100%",
+                              }}
+                            >
                               <Tooltip
-                                label={cardStarred ? "Unstar item" : "Star item"}
+                                label={
+                                  cardStarred ? "Unstar item" : "Star item"
+                                }
+                                withArrow
                               >
                                 <ActionIcon
-                                  variant={cardStarred ? "filled" : "subtle"}
+                                  size="sm"
+                                  variant="subtle"
                                   color={cardStarred ? "yellow" : "gray"}
-                                  aria-label={cardStarred ? "Unstar item" : "Star item"}
-                                  onClick={() => handleToggleStar(cardId)}
+                                  aria-label={
+                                    cardStarred ? "Unstar item" : "Star item"
+                                  }
+                                  style={{
+                                    position: "absolute",
+                                    top: 6,
+                                    right: 6,
+                                    opacity: cardStarred ? 0.9 : 0.4,
+                                    background: "transparent",
+                                    boxShadow: "none",
+                                  }}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    handleToggleStar(cardId);
+                                  }}
                                 >
                                   {cardStarred ? (
-                                    <IconStarFilled size={16} />
+                                    <IconStarFilled size={14} />
                                   ) : (
-                                    <IconStar size={16} />
+                                    <IconStar size={14} />
                                   )}
                                 </ActionIcon>
                               </Tooltip>
-                            </Group>
-                            <Box style={canvasStyles.outer}>
-                              <Box style={canvasStyles.inner}>
-                                {layers.length ? (
-                                  layers.map((layer) => (
-                                    <img
-                                      key={`${cardId}-${layer.suffix}`}
-                                      src={layer.url}
-                                      alt={`${fabric.label} ${layer.label}`}
-                                      style={canvasStyles.layer}
-                                    />
-                                  ))
-                                ) : (
-                                  <Box
-                                    style={{
-                                      position: "absolute",
-                                      inset: 0,
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "center",
-                                    }}
-                                  >
-                                    <Text size="sm" c="dimmed">
-                                      No layers available
-                                    </Text>
-                                  </Box>
-                                )}
+                              <Box style={canvasStyles.outer}>
+                                <Box style={canvasStyles.inner}>
+                                  {layers.length ? (
+                                    layers.map((layer) => (
+                                      <img
+                                        key={`${cardId}-${layer.suffix}`}
+                                        src={layer.url}
+                                        alt={`${fabric.label} ${layer.label}`}
+                                        style={canvasStyles.layer}
+                                      />
+                                    ))
+                                  ) : (
+                                    <Box
+                                      style={{
+                                        position: "absolute",
+                                        inset: 0,
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                      }}
+                                    >
+                                      <Text size="sm" c="dimmed">
+                                        No layers available
+                                      </Text>
+                                    </Box>
+                                  )}
+                                </Box>
                               </Box>
-                            </Box>
+                            </Card>
                           </Stack>
-                        </Card>
-                      );
-                    })}
-                  </Box>
-                </Stack>
-              ))
-            )}
+                        );
+                      })}
+                    </Box>
+                  </Stack>
+                ))
+              )}
             </Stack>
           </Box>
         </Stack>
@@ -554,20 +598,26 @@ function GalleryToolbar({
     return (
       <Card
         withBorder
-        radius="lg"
-        padding="md"
+        radius="md"
+        padding="xs"
         style={{
-          width: 88,
-          position: "sticky",
+          width: 50,
+          position: "fixed",
           top: "50vh",
-          left: 0,
+          left: "12px",
           transform: "translateY(-50%)",
-          alignSelf: "flex-start",
           zIndex: 5,
+          background: "rgba(0, 0, 0, 0.45)",
+          backdropFilter: "blur(6px)",
+          borderTopLeftRadius: 0,
+          borderBottomLeftRadius: 0,
         }}
       >
         <Stack gap="sm" align="center">
-          <ToolbarIconControl label="Select run" icon={<IconListCheck size={16} />}>
+          <ToolbarIconControl
+            label="Select run"
+            icon={<IconListCheck size={16} />}
+          >
             <Select
               placeholder="Select a run"
               data={runOptions}
@@ -575,13 +625,16 @@ function GalleryToolbar({
               onChange={onRunChange}
               searchable
               allowDeselect={false}
-              nothingFound="No runs"
+              nothingFoundMessage="No runs"
               disabled={!runOptions.length}
               style={{ width: 240 }}
             />
           </ToolbarIconControl>
 
-          <ToolbarIconControl label="Image size" icon={<IconArrowsMaximize size={16} />}>
+          <ToolbarIconControl
+            label="Image size"
+            icon={<IconArrowsMaximize size={16} />}
+          >
             <SegmentedControl
               value={imageSize}
               onChange={(value) => onImageSizeChange(value)}
@@ -590,11 +643,16 @@ function GalleryToolbar({
             />
           </ToolbarIconControl>
 
-          <ToolbarIconControl label="Star filter" icon={<IconFilter size={16} />}>
+          <ToolbarIconControl
+            label="Star filter"
+            icon={<IconFilter size={16} />}
+          >
             <Stack gap="xs" style={{ width: 220 }}>
               <SegmentedControl
                 value={starFilter}
-                onChange={(value) => onStarFilterChange(value as "all" | "starred")}
+                onChange={(value) =>
+                  onStarFilterChange(value as "all" | "starred")
+                }
                 data={[
                   { label: "All", value: "all" },
                   { label: "Starred", value: "starred" },
@@ -636,12 +694,13 @@ function GalleryToolbar({
       padding="lg"
       style={{
         width: 320,
-        position: "sticky",
+        position: "fixed",
         top: "50vh",
-        left: 0,
+        left: "12px",
         transform: "translateY(-50%)",
-        alignSelf: "flex-start",
         zIndex: 5,
+        borderTopLeftRadius: 0,
+        borderBottomLeftRadius: 0,
       }}
     >
       <Stack gap="md">
@@ -654,7 +713,7 @@ function GalleryToolbar({
             onChange={onRunChange}
             searchable
             allowDeselect={false}
-            nothingFound="No runs"
+            nothingFoundMessage="No runs"
             disabled={!runOptions.length}
           />
         </Stack>

@@ -20,6 +20,7 @@ import {
   Stack,
   Switch,
   Text,
+  TextInput,
   Textarea,
   Title,
 } from "@mantine/core";
@@ -29,13 +30,15 @@ import { WorkspaceNav } from "../components/workspace-nav";
 import {
   loadRunFormOptions,
   createRunFromSelection,
+  getExpectedRunNumber,
   type RunFormOptions,
   type RunSelection,
 } from "../utils/run-planner.server";
 
 export async function loader({}: LoaderFunctionArgs) {
   const runOptions = await loadRunFormOptions();
-  return json({ runOptions });
+  const expectedRunNumber = await getExpectedRunNumber();
+  return json({ runOptions, expectedRunNumber });
 }
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -94,12 +97,15 @@ function buildInitialState(options: RunFormOptions): Record<string, GarmentSelec
 }
 
 export default function NewRunRoute() {
-  const { runOptions } = useLoaderData<LoaderData>();
+  const { runOptions, expectedRunNumber } = useLoaderData<LoaderData>();
   const fetcher = useFetcher<typeof action>();
   const navigate = useNavigate();
   const [mode, setMode] = useState(runOptions.modes[0]?.value ?? "");
   const [note, setNote] = useState("");
   const [saveDebugFiles, setSaveDebugFiles] = useState(false);
+  const [runNumber, setRunNumber] = useState(
+    () => expectedRunNumber?.padded ?? ""
+  );
   const [formError, setFormError] = useState<string | null>(null);
   const [selections, setSelections] = useState<Record<string, GarmentSelectionState>>(() =>
     buildInitialState(runOptions)
@@ -109,7 +115,8 @@ export default function NewRunRoute() {
   useEffect(() => {
     setSelections(buildInitialState(runOptions));
     setMode(runOptions.modes[0]?.value ?? "");
-  }, [runOptions]);
+    setRunNumber(expectedRunNumber?.padded ?? "");
+  }, [runOptions, expectedRunNumber]);
 
   useEffect(() => {
     if (fetcher.data?.success && fetcher.data.runId) {
@@ -253,6 +260,19 @@ export default function NewRunRoute() {
       setFormError("Select a mode");
       return;
     }
+    const trimmedRunNumber = runNumber.trim();
+    let numericRunNumber: number | null = null;
+    if (trimmedRunNumber) {
+      if (!/^[0-9]+$/.test(trimmedRunNumber)) {
+        setFormError("Run number must be a positive integer");
+        return;
+      }
+      numericRunNumber = Number(trimmedRunNumber);
+      if (!Number.isInteger(numericRunNumber) || numericRunNumber < 1) {
+        setFormError("Run number must be a positive integer");
+        return;
+      }
+    }
     if (!activeGarments.length) {
       setFormError("Select at least one garment");
       return;
@@ -271,6 +291,7 @@ export default function NewRunRoute() {
         assets: entry.assets,
       })),
       saveDebugFiles,
+      runNumber: numericRunNumber ?? undefined,
     };
     const formData = new FormData();
     formData.append("intent", "create-run");
@@ -322,6 +343,13 @@ export default function NewRunRoute() {
                 withinPortal={false}
                 disabled={!modeOptions.length}
                 required
+              />
+              <TextInput
+                label="Run number (optional)"
+                description="Leave blank to auto-increment; setting a number updates the shared counter."
+                placeholder="Auto"
+                value={runNumber}
+                onChange={(event) => setRunNumber(event.currentTarget.value)}
               />
               <Switch
                 label="Save debug files"

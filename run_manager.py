@@ -14,6 +14,13 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from path_utils import RUNS_DIR, CODE_ROOT
 
+try:  # Optional; only needed when BLENDOMATIC_RUN_STORE points at S3.
+    import boto3  # type: ignore
+    from botocore.exceptions import ClientError  # type: ignore
+except Exception:  # pragma: no cover - boto3 not always installed locally
+    boto3 = None  # type: ignore
+    ClientError = Exception  # type: ignore
+
 COUNTER_FILE = RUNS_DIR / ".counter"
 MANIFEST_HEADERS = [
     "timestamp",
@@ -26,6 +33,9 @@ MANIFEST_HEADERS = [
     "worker",
     "notes",
 ]
+
+RUN_STORE_ENV = "BLENDOMATIC_RUN_STORE"
+RUN_STORE_FALLBACK_ENV = "BLENDOMATIC_S3_STORE"
 
 
 @dataclass
@@ -63,18 +73,109 @@ def _read_git_commit() -> Optional[str]:
         return None
 
 
-def allocate_run_id(width: int = 4) -> str:
-    _ensure_runs_dir()
-    current = 0
+def _parse_s3_uri(uri: str) -> tuple[str, str]:
+    if not uri.startswith("s3://"):
+        raise ValueError(f"Run store must be an s3:// URI, got '{uri}'")
+    without = uri[5:]
+    parts = without.split("/", 1)
+    bucket = parts[0]
+    prefix = parts[1] if len(parts) > 1 else ""
+    return bucket, prefix
+
+
+def _get_s3_counter_store() -> Optional[Dict[str, Any]]:
+    uri = os.environ.get(RUN_STORE_ENV) or os.environ.get(RUN_STORE_FALLBACK_ENV)
+    if not uri or not uri.startswith("s3://"):
+        return None
+    if boto3 is None:
+        raise RuntimeError("BLENDOMATIC_RUN_STORE points at S3 but boto3 is not installed")
+    bucket, prefix = _parse_s3_uri(uri)
+    base_runs_prefix = f"{prefix.rstrip('/')}/runs" if prefix.strip("/") else "runs"
+    client = boto3.client("s3")
+    return {
+        "bucket": bucket,
+        "base_runs_prefix": base_runs_prefix.rstrip("/"),
+        "client": client,
+    }
+
+
+def _read_s3_counter(store: Dict[str, Any]) -> Optional[int]:
+    key = f"{store['base_runs_prefix']}/.counter"
+    client = store["client"]
+    try:
+        result = client.get_object(Bucket=store["bucket"], Key=key)
+        body = result["Body"].read().decode("utf-8").strip()
+        return int(body)
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code")
+        if code in ("NoSuchKey", "404", "NotFound"):
+            return None
+        raise
+    except Exception:
+        return None
+
+
+def _write_s3_counter(store: Dict[str, Any], value: int) -> None:
+    key = f"{store['base_runs_prefix']}/.counter"
+    payload = str(value)
+    client = store["client"]
+    client.put_object(
+        Bucket=store["bucket"],
+        Key=key,
+        Body=payload.encode("utf-8"),
+        ContentType="text/plain",
+    )
+
+
+def _scan_existing_s3_run_numbers(store: Dict[str, Any]) -> int:
+    highest = 0
+    prefix = store["base_runs_prefix"].rstrip("/") + "/"
+    client = store["client"]
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=store["bucket"], Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            suffix = key[len(prefix) :]
+            run_id = suffix.split("/", 1)[0]
+            if run_id.isdigit():
+                try:
+                    highest = max(highest, int(run_id))
+                except Exception:
+                    continue
+    return highest
+
+
+def _read_local_counter() -> Optional[int]:
     if COUNTER_FILE.exists():
         try:
-            current = int(COUNTER_FILE.read_text().strip())
+            return int(COUNTER_FILE.read_text().strip())
         except Exception:
-            current = 0
-    else:
-        current = _scan_existing_run_numbers()
+            return None
+    return None
+
+
+def allocate_run_id(width: int = 4) -> str:
+    _ensure_runs_dir()
+    candidates: List[int] = []
+
+    s3_store = _get_s3_counter_store()
+    if s3_store:
+        s3_counter = _read_s3_counter(s3_store)
+        if s3_counter is None:
+            s3_counter = _scan_existing_s3_run_numbers(s3_store)
+        candidates.append(s3_counter)
+
+    local_counter = _read_local_counter()
+    if local_counter is not None:
+        candidates.append(local_counter)
+    candidates.append(_scan_existing_run_numbers())
+
+    current = max(candidates) if candidates else 0
     next_value = current + 1
+
     COUNTER_FILE.write_text(str(next_value))
+    if s3_store:
+        _write_s3_counter(s3_store, next_value)
     return f"{next_value:0{width}d}"
 
 

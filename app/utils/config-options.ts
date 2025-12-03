@@ -20,7 +20,7 @@ type CategorizedSuffix = {
 const COLLAR_SUFFIXES: Record<string, string[]> = {
   Band: ["band_collar"],
   Regular: ["reg_collar"],
-  "Button-down": ["button_collar", "buttondown_collar"],
+  "Button-down": ["button_collar", "buttondown_collar", "bd_collar"],
 };
 
 const PLACKET_SUFFIXES: Record<string, string[]> = {

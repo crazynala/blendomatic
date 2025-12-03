@@ -238,7 +238,8 @@ const normalizeFabricSlug = (value?: string | null): string | null => {
 };
 
 const normalizeAssetSuffix = (value?: string | null): string => {
-  return slugify(value ?? "asset", "asset");
+  const trimmed = String(value ?? "").trim();
+  return trimmed || "asset";
 };
 
 const resolveAssetMeta = (
