@@ -65,7 +65,7 @@
       "suffix": "Body_LS",
       "meshes": [
         {
-          "name": "Body LS.002",
+          "name": "Body LS",
           "render": true
         }
       ]
@@ -103,18 +103,32 @@
       ]
     },
     {
-      "name": "Hidden Placket Variant",
-      "suffix": "placket-hidden",
+      "name": "Pocket Variant",
+      "suffix": "pocket",
       "meshes": [
+        {
+          "name": "Pocket",
+          "render": true
+        },
         {
           "name": "Body SS",
           "shadow_catcher": true
-        },
-        {
-          "name": "Placket",
-          "render": true
         }
-      ]
-    }
-  ]
-}
+       ]
+     },
+    {
+          "name": "Hidden Placket Variant",
+          "suffix": "placket-hidden",
+          "meshes": [
+            {
+              "name": "Body SS",
+              "shadow_catcher": true
+            },
+            {
+              "name": "Placket",
+              "render": true
+            }
+           ]
+          }
+        ]
+       }
