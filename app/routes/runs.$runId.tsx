@@ -1,10 +1,11 @@
-import { json } from "@remix-run/node";
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { Link, useLoaderData, useParams, useRevalidator } from "@remix-run/react";
+import { json, redirect } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import { Form, Link, useLoaderData, useNavigation, useParams, useRevalidator } from "@remix-run/react";
 import {
   Anchor,
   Badge,
   Box,
+  Button,
   Card,
   Center,
   Code,
@@ -17,12 +18,16 @@ import {
   SimpleGrid,
   Stack,
   Text,
+  Textarea,
+  TextInput,
   Title,
 } from "@mantine/core";
 import {
   IconArrowLeft,
   IconArticle,
   IconClipboardList,
+  IconPlayerPause,
+  IconPlayerPlay,
 } from "@tabler/icons-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { WorkspaceNav } from "../components/workspace-nav";
@@ -34,7 +39,7 @@ export async function loader({ params }: LoaderFunctionArgs) {
     throw new Response("Run ID required", { status: 400 });
   }
   const [
-    { getRunDetail },
+    { getRunDetail, getRunStateEntry, setAllowedWorkersMetadata, deleteRun },
     { buildJobPreview, inferRenderDateFolder },
   ] = await Promise.all([
     import("../utils/run-store.server"),
@@ -44,12 +49,19 @@ export async function loader({ params }: LoaderFunctionArgs) {
   if (!detail) {
     throw new Response("Run not found", { status: 404 });
   }
+  const runState = await getRunStateEntry(runId);
+  const allowedWorkers =
+    (Array.isArray(detail.summary.allowedWorkers) && detail.summary.allowedWorkers) ||
+    (Array.isArray((detail.metadata as any)?.allowed_workers) && (detail.metadata as any)?.allowed_workers) ||
+    [];
   const renderDateFolder = inferRenderDateFolder(detail.summary);
 
   const jobsWithPreview = await Promise.all(
     detail.jobs.map(async (job) => {
       const remoteAssetUrl =
-        buildAssetPublicUrl(job.result?.uploaded ?? null) ?? null;
+        buildAssetPublicUrl(job.result?.gallery ?? null) ??
+        buildAssetPublicUrl(job.result?.uploaded ?? null) ??
+        null;
       const remoteThumbnailUrl =
         buildAssetPublicUrl(job.result?.thumbnail ?? null) ??
         remoteAssetUrl ??
@@ -68,7 +80,55 @@ export async function loader({ params }: LoaderFunctionArgs) {
     ...detail,
     jobs: jobsWithPreview,
     renderDateFolder,
+    paused: Boolean(runState?.paused),
+    allowedWorkers,
   });
+}
+
+export async function action({ request, params }: ActionFunctionArgs) {
+  const runId = params.runId;
+  if (!runId) {
+    throw new Response("Run ID required", { status: 400 });
+  }
+  const formData = await request.formData();
+  const intent = formData.get("intent");
+
+  if (intent === "toggle-pause") {
+    const desired = formData.get("paused") === "true";
+    const { setRunPaused } = await import("../utils/run-store.server");
+    await setRunPaused(runId, desired);
+    return redirect(`/runs/${runId}`);
+  }
+
+  if (intent === "update-allowed-workers") {
+    const raw = formData.get("workers");
+    const { setAllowedWorkersMetadata } = await import("../utils/run-store.server");
+    const list =
+      typeof raw === "string"
+        ? raw
+            .split(/[\n,]/)
+            .map((v) => v.trim())
+            .filter(Boolean)
+        : [];
+    await setAllowedWorkersMetadata(runId, Array.from(new Set(list)));
+    return redirect(`/runs/${runId}`);
+  }
+
+  if (intent === "delete-run") {
+    const confirm = formData.get("confirm");
+    const expected = `delete ${runId}`;
+    if (typeof confirm !== "string" || confirm.trim().toLowerCase() !== expected.toLowerCase()) {
+      return json(
+        { success: false, error: `Type '${expected}' to confirm deletion.` },
+        { status: 400 }
+      );
+    }
+    const { deleteRun } = await import("../utils/run-store.server");
+    await deleteRun(runId);
+    return redirect("/runs");
+  }
+
+  return json({ success: false, error: "Unknown intent" }, { status: 400 });
 }
 
 type LoaderData = Awaited<ReturnType<typeof loader>>;
@@ -104,6 +164,10 @@ export default function RunDetailRoute() {
   const data = useLoaderData<LoaderData>();
   const params = useParams();
   const revalidator = useRevalidator();
+  const navigation = useNavigation();
+  const [allowedWorkersValue, setAllowedWorkersValue] = useState(
+    data.allowedWorkers?.join(", ") ?? ""
+  );
   const [jobFilter, setJobFilter] = useState<JobFilter>("all");
   useEffect(() => {
     const interval = setInterval(() => {
@@ -115,6 +179,10 @@ export default function RunDetailRoute() {
   useEffect(() => {
     setJobFilter("all");
   }, [params.runId]);
+
+  useEffect(() => {
+    setAllowedWorkersValue(data.allowedWorkers?.join(", ") ?? "");
+  }, [data.allowedWorkers]);
 
   const filteredJobs = useMemo(() => {
     return data.jobs.filter((job) => {
@@ -153,16 +221,83 @@ export default function RunDetailRoute() {
               {data.summary.note || "No operator note recorded."}
             </Text>
           </Stack>
-          <Badge
-            size="lg"
-            color={
-              statusColor[data.summary.status?.toLowerCase() ?? "pending"] ??
-              "gray"
-            }
-          >
-            {data.summary.status}
-          </Badge>
+          <Group gap="sm">
+            <Badge
+              size="lg"
+              color={
+                statusColor[data.summary.status?.toLowerCase() ?? "pending"] ??
+                "gray"
+              }
+            >
+              {data.summary.status}
+            </Badge>
+          </Group>
         </Group>
+
+        <Card withBorder radius="lg" padding="lg">
+          <Stack gap="md">
+            <Group justify="space-between" align="center">
+              <Text fw={600}>Run controls</Text>
+              <Badge color={data.paused ? "red" : "green"} variant="light">
+                {data.paused ? "Paused" : "Active"}
+              </Badge>
+            </Group>
+            <Group wrap="wrap" gap="sm">
+              <Form method="post" replace>
+                <input type="hidden" name="intent" value="toggle-pause" />
+                <input type="hidden" name="paused" value={String(!data.paused)} />
+                <Button
+                  type="submit"
+                  color={data.paused ? "green" : "yellow"}
+                  leftSection={data.paused ? <IconPlayerPlay size={14} /> : <IconPlayerPause size={14} />}
+                  loading={navigation.state === "submitting"}
+                >
+                  {data.paused ? "Resume run" : "Pause run"}
+                </Button>
+              </Form>
+            </Group>
+            <Divider />
+            <Stack gap="xs">
+              <Text fw={600}>Allowed workers</Text>
+              <Text size="sm" c="dimmed">
+                Limit this run to specific worker IDs (comma or newline separated). Leave blank to allow all workers.
+              </Text>
+              <Form method="post" replace>
+                <input type="hidden" name="intent" value="update-allowed-workers" />
+                <Textarea
+                  name="workers"
+                  minRows={2}
+                  value={allowedWorkersValue}
+                  onChange={(event) => setAllowedWorkersValue(event.currentTarget.value)}
+                  placeholder="worker-1, worker-2"
+                />
+                <Button type="submit" mt="sm" variant="light">
+                  Save worker restrictions
+                </Button>
+              </Form>
+            </Stack>
+            <Divider />
+            <Stack gap="xs">
+              <Text fw={600} c="red">
+                Delete run
+              </Text>
+              <Text size="sm" c="dimmed">
+                Type <Code>delete {data.summary.runId}</Code> to confirm permanent deletion (including S3 objects).
+              </Text>
+              <Form method="post" replace>
+                <input type="hidden" name="intent" value="delete-run" />
+                <TextInput
+                  name="confirm"
+                  placeholder={`delete ${data.summary.runId}`}
+                  required
+                />
+                <Button type="submit" color="red" variant="light" mt="sm">
+                  Delete run
+                </Button>
+              </Form>
+            </Stack>
+          </Stack>
+        </Card>
 
         <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }}>
           <StatCard label="Progress" value={`${data.summary.progressPercent}%`}>

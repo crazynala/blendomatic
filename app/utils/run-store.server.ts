@@ -3,6 +3,8 @@ import { promises as fs } from "node:fs";
 import {
   ListObjectsV2Command,
   GetObjectCommand,
+  PutObjectCommand,
+  DeleteObjectsCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
 import { ensureServerEnv } from "./load-env.server";
@@ -47,6 +49,7 @@ export type RunSummary = {
   note?: string;
   mode?: string;
   garment?: string;
+  allowedWorkers?: string[];
   totalJobs: number;
   completedJobs: number;
   failedJobs: number;
@@ -74,6 +77,7 @@ type RunMetadata = {
   mode?: string;
   garment?: string;
   total_jobs?: number;
+  allowed_workers?: string[];
 };
 
 type JobFileRecord = {
@@ -119,6 +123,9 @@ function parseStoreUri(uri: string) {
   };
 }
 
+const STATE_PATH = path.join(RUNS_ROOT, "state.json");
+const RUN_CACHE_ROOT = path.join(RUNS_ROOT, "_worker_cache");
+
 async function safeReadDir(dirPath: string) {
   try {
     return await fs.readdir(dirPath, { withFileTypes: true });
@@ -159,6 +166,57 @@ function normalizeJob(record: JobFileRecord): RunJobRecord {
     config: record.config ?? {},
     result: record.result ?? null,
   };
+}
+
+async function loadRunState(): Promise<{ runs: Record<string, any>; default: Record<string, any> }> {
+  const fallback = { runs: {}, default: { priority: 100 } };
+  try {
+    const raw = await safeReadFile(STATE_PATH);
+    if (!raw) return fallback;
+    const data = JSON.parse(raw) as any;
+    if (!data.runs) data.runs = {};
+    if (!data.default) data.default = { priority: 100 };
+    return data;
+  } catch (error) {
+    console.warn("[run-store] Failed to load state manifest:", error);
+    return fallback;
+  }
+}
+
+async function saveRunState(data: any) {
+  try {
+    await fs.mkdir(path.dirname(STATE_PATH), { recursive: true });
+    await fs.writeFile(STATE_PATH, JSON.stringify(data, null, 2));
+  } catch (error) {
+    console.warn("[run-store] Failed to save state manifest:", error);
+  }
+}
+
+export async function getRunStateEntry(runId: string): Promise<Record<string, any>> {
+  const state = await loadRunState();
+  return state.runs?.[runId] ?? {};
+}
+
+export async function setRunPaused(runId: string, paused: boolean): Promise<void> {
+  const state = await loadRunState();
+  state.runs = state.runs || {};
+  state.runs[runId] = { ...(state.runs[runId] ?? {}), paused };
+  await saveRunState(state);
+}
+
+export async function setAllowedWorkers(runId: string, allowed: string[]): Promise<void> {
+  const state = await loadRunState();
+  state.runs = state.runs || {};
+  state.runs[runId] = { ...(state.runs[runId] ?? {}), allowed_workers: allowed };
+  await saveRunState(state);
+}
+
+export async function removeRunStateEntry(runId: string): Promise<void> {
+  const state = await loadRunState();
+  if (state.runs?.[runId]) {
+    delete state.runs[runId];
+    await saveRunState(state);
+  }
 }
 
 function computeJobStats(
@@ -370,6 +428,9 @@ function buildSummary(
     note: metadata?.note,
     mode: metadata?.mode,
     garment: metadata?.garment,
+    allowedWorkers: Array.isArray(metadata?.allowed_workers)
+      ? (metadata?.allowed_workers as string[])
+      : undefined,
     totalJobs: stats.totalJobs,
     completedJobs: stats.completedJobs,
     failedJobs: stats.failedJobs,
@@ -416,4 +477,75 @@ export async function getRunDetail(runId: string): Promise<RunDetail | null> {
     notes: bundle.notes,
     metadata: bundle.metadata as Record<string, unknown> | null,
   };
+}
+
+export async function updateRunMetadata(runId: string, updates: Record<string, unknown>): Promise<void> {
+  if (USE_S3 && s3Client && bucket) {
+    const baseKey = `${RUNS_SUBDIR.replace(/\/+$/u, "")}/${runId}`;
+    const existing = (await readS3Json<Record<string, unknown>>(`${baseKey}/run.json`)) ?? {};
+    const merged = { ...existing, ...updates };
+    const payload = JSON.stringify(merged, null, 2) + "\n";
+    await s3Client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: `${baseKey}/run.json`,
+        Body: payload,
+        ContentType: "application/json",
+      })
+    );
+    return;
+  }
+
+  const runDir = path.join(RUNS_ROOT, runId);
+  const runPath = path.join(runDir, "run.json");
+  const existing = (await safeParseJson<Record<string, unknown>>(runPath)) ?? {};
+  const merged = { ...existing, ...updates };
+  await fs.mkdir(runDir, { recursive: true });
+  await fs.writeFile(runPath, JSON.stringify(merged, null, 2) + "\n", "utf-8");
+}
+
+export async function setAllowedWorkersMetadata(runId: string, allowed: string[]): Promise<void> {
+  await updateRunMetadata(runId, { allowed_workers: allowed });
+  await setAllowedWorkers(runId, allowed);
+}
+
+export async function deleteRun(runId: string): Promise<void> {
+  if (USE_S3 && s3Client && bucket) {
+    const prefix = `${RUNS_SUBDIR.replace(/\/+$/u, "")}/${runId}/`;
+    let continuationToken: string | undefined;
+    do {
+      const listResult = await s3Client.send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          Prefix: prefix,
+          ContinuationToken: continuationToken,
+        })
+      );
+      const contents = listResult.Contents ?? [];
+      if (contents.length) {
+        const objects = contents.map((obj) => ({ Key: obj.Key! }));
+        await s3Client.send(
+          new DeleteObjectsCommand({
+            Bucket: bucket,
+            Delete: { Objects: objects },
+          })
+        );
+      }
+      continuationToken = listResult.NextContinuationToken;
+    } while (continuationToken);
+  } else {
+    const runDir = path.join(RUNS_ROOT, runId);
+    try {
+      await fs.rm(runDir, { recursive: true, force: true });
+    } catch (error) {
+      console.warn(`[run-store] Failed to delete local run ${runId}:`, error);
+    }
+  }
+  try {
+    const cacheDir = path.join(RUN_CACHE_ROOT, runId);
+    await fs.rm(cacheDir, { recursive: true, force: true });
+  } catch (error) {
+    // best effort
+  }
+  await removeRunStateEntry(runId);
 }

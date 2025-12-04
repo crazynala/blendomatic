@@ -277,7 +277,9 @@ async function buildGallery({
     if (mode && job.config?.mode && job.config.mode !== mode) {
       continue;
     }
-    const assetLocation = buildAssetPublicUrl(job.result?.uploaded ?? null);
+    const assetLocation =
+      buildAssetPublicUrl((job.result as any)?.gallery ?? null) ??
+      buildAssetPublicUrl(job.result?.uploaded ?? null);
     if (!assetLocation) {
       continue;
     }

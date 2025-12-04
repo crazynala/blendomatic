@@ -346,13 +346,49 @@ export default function GalleryRoute() {
       >
         <Stack gap="xl" style={{ width: "fit-content" }}>
           <WorkspaceNav />
-          <Stack gap="xs">
-            <Title order={2}>Render Explorer</Title>
-            <Text c="dimmed">
-              Browse completed renders, compare fabrics, and adjust the global
-              configuration controls to see how each garment responds.
-            </Text>
-          </Stack>
+          <Group justify="space-between" align="flex-start" style={{ minWidth: "calc(100% - 240px)" }}>
+            <Stack gap="xs">
+              <Title order={2}>Render Explorer</Title>
+              {selectedRun ? (
+                <Stack gap={2}>
+                  <Group gap="xs">
+                    <Badge
+                      color={
+                        runStatusColor[
+                          selectedRun.status?.toLowerCase() ?? "pending"
+                        ] ?? "gray"
+                      }
+                    >
+                      {selectedRun.status ?? "pending"}
+                    </Badge>
+                    <Text fw={600}>Run {selectedRun.runId}</Text>
+                  </Group>
+                  <Text size="sm" c="dimmed">
+                    Mode {selectedRun.mode ?? "—"} • Folder {renderFolder ?? "—"}
+                  </Text>
+                  <Text size="sm" c="dimmed">
+                    {selectedRun.note?.trim() || "No operator note"}
+                  </Text>
+                  <Text size="sm">
+                    {selectedRun.completedJobs}/{selectedRun.totalJobs} completed
+                  </Text>
+                </Stack>
+              ) : (
+                <Text c="dimmed">Select a run to view gallery items.</Text>
+              )}
+            </Stack>
+            <Select
+              placeholder="Select a run"
+              data={runOptions}
+              value={selectedRunId}
+              onChange={handleRunChange}
+              searchable
+              allowDeselect={false}
+              nothingFoundMessage="No runs"
+              disabled={!runOptions.length}
+              style={{ width: 280 }}
+            />
+          </Group>
 
           <Box
             style={{
@@ -365,9 +401,9 @@ export default function GalleryRoute() {
             }}
           >
             <GalleryToolbar
-              runOptions={runOptions}
+              runOptions={[]}
               selectedRunId={selectedRunId}
-              onRunChange={handleRunChange}
+              onRunChange={() => {}}
               configOptions={configOptions}
               config={config}
               onConfigChange={handleConfigChange}
@@ -379,41 +415,12 @@ export default function GalleryRoute() {
               collapsed={toolbarCollapsed}
             />
             <Stack gap="xl" style={{ flex: 1, width: "fit-content" }}>
-              {selectedRun ? (
-                <Card withBorder radius="lg" padding="lg">
-                  <Group justify="space-between" align="flex-start">
-                    <Stack gap={4}>
-                      <Text fw={600}>Run {selectedRun.runId}</Text>
-                      <Text size="sm" c="dimmed">
-                        Mode {selectedRun.mode ?? "—"} • Folder{" "}
-                        {renderFolder ?? "—"}
-                      </Text>
-                      <Text size="sm" c="dimmed">
-                        {selectedRun.note?.trim() || "No operator note"}
-                      </Text>
-                      <Text size="sm">
-                        {selectedRun.completedJobs}/{selectedRun.totalJobs}{" "}
-                        completed
-                      </Text>
-                    </Stack>
-                    <Badge
-                      color={
-                        runStatusColor[
-                          selectedRun.status?.toLowerCase() ?? "pending"
-                        ] ?? "gray"
-                      }
-                    >
-                      {selectedRun.status ?? "pending"}
-                    </Badge>
-                  </Group>
-                </Card>
-              ) : (
+              {!selectedRun ? (
                 <Alert title="No runs found" color="yellow" variant="filled">
                   There are no completed runs yet. Start a run to populate the
                   gallery.
                 </Alert>
-              )}
-
+              ) : null}
               {!hasGalleryContent ? (
                 <Alert title="No renders found" color="yellow" variant="filled">
                   We couldn&apos;t find any PNG outputs for this run. Try a

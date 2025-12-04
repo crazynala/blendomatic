@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, TextIO
 from datetime import datetime, timezone
+import importlib.util
 
 try:
     from textual.app import App, ComposeResult
@@ -121,6 +122,34 @@ except Exception:
     _get_worker_id = None
     _get_worker_mode = None
     _set_worker_log_sink = None
+
+# Dependency checks (optional features)
+def _check_dependencies() -> List[str]:
+    """Return a list of dependency warnings to surface at startup."""
+    warnings: List[str] = []
+    uses_s3 = bool(
+        os.environ.get("BLENDOMATIC_RUN_STORE")
+        or os.environ.get("BLENDOMATIC_S3_STORE")
+        or os.environ.get("BLENDOMATIC_WORKER_STORE")
+    )
+
+    if importlib.util.find_spec("boto3") is None and uses_s3:
+        warnings.append(
+            "boto3 not installed; S3-backed run/worker stores will not work. Install with pip install boto3"
+        )
+    if importlib.util.find_spec("PIL") is None:
+        warnings.append(
+            "Pillow not installed; worker thumbnail/gallery renditions will be skipped. Install with pip install pillow"
+        )
+    return warnings
+
+
+DEPENDENCY_WARNINGS = _check_dependencies()
+for _msg in DEPENDENCY_WARNINGS:
+    try:
+        print(f"[DEPS] {_msg}", flush=True)
+    except Exception:
+        pass
 
 # Modal Screen Classes must be defined before use
 if TEXTUAL_AVAILABLE:
@@ -1159,6 +1188,9 @@ class BlenderTUIApp(App):
         self.write_message("🚀 Initializing Blender TUI...")
         if self.tui_log_file_path:
             self.write_message(f"📝 Session log: {self.tui_log_file_path}")
+        if DEPENDENCY_WARNINGS:
+            for msg in DEPENDENCY_WARNINGS:
+                self.write_message(f"⚠️ Dependency: {msg}")
         self._update_record_run_controls()
         self._update_node_mode_ui()
         # Log Textual version and consolidated modal support for diagnostics
