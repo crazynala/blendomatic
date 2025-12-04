@@ -22,6 +22,7 @@ import {
   Stack,
   Text,
   Title,
+  Affix,
   Tooltip,
 } from "@mantine/core";
 import {
@@ -29,10 +30,11 @@ import {
   useMemo,
   useRef,
   useState,
+  JSX,
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { useLocalStorage } from "@mantine/hooks";
+import { useLocalStorage, useElementSize } from "@mantine/hooks";
 import { describeRenders, type LayerEntry } from "../utils/gallery.server";
 import { listRunSummaries, getRunDetail } from "../utils/run-store.server";
 import { WorkspaceNav } from "../components/workspace-nav";
@@ -139,7 +141,7 @@ const formatRunTimestamp = (value?: string | null) => {
   })}`;
 };
 
-export default function GalleryRoute() {
+export default function GalleryRoute(): JSX.Element {
   const { runs, selectedRunId, renderFolder, gallery, configOptions } =
     useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
@@ -165,7 +167,7 @@ export default function GalleryRoute() {
     const node = scrollContainerRef.current;
     if (!node) return;
     const handleScroll = () => {
-      setToolbarCollapsed(node.scrollLeft > 80);
+      setToolbarCollapsed(node.scrollLeft > 160);
     };
     handleScroll();
     node.addEventListener("scroll", handleScroll, { passive: true });
@@ -332,64 +334,68 @@ export default function GalleryRoute() {
 
   const hasGalleryContent = sortedRows.length > 0;
   const hasVisibleRows = visibleRows.length > 0;
-  const toolbarOffset = toolbarCollapsed ? 120 : 360;
+  const toolbarOffset = 360; // toolbarCollapsed ? 120 : 360;
 
   return (
-    <Box ref={scrollContainerRef} style={{ width: "100%", overflowX: "auto" }}>
-      <Container
-        fluid
-        py="xl"
-        style={{
-          minHeight: "100vh",
-          paddingBottom: "var(--mantine-spacing-xl)",
-        }}
-      >
-        <Stack gap="xl" style={{ width: "fit-content" }}>
-          <WorkspaceNav />
-          <Group justify="space-between" align="flex-start" style={{ minWidth: "calc(100% - 240px)" }}>
-            <Stack gap="xs">
-              <Title order={2}>Render Explorer</Title>
-              {selectedRun ? (
-                <Stack gap={2}>
-                  <Group gap="xs">
-                    <Badge
-                      color={
-                        runStatusColor[
-                          selectedRun.status?.toLowerCase() ?? "pending"
-                        ] ?? "gray"
-                      }
-                    >
-                      {selectedRun.status ?? "pending"}
-                    </Badge>
-                    <Text fw={600}>Run {selectedRun.runId}</Text>
-                  </Group>
-                  <Text size="sm" c="dimmed">
-                    Mode {selectedRun.mode ?? "—"} • Folder {renderFolder ?? "—"}
-                  </Text>
-                  <Text size="sm" c="dimmed">
-                    {selectedRun.note?.trim() || "No operator note"}
-                  </Text>
-                  <Text size="sm">
-                    {selectedRun.completedJobs}/{selectedRun.totalJobs} completed
-                  </Text>
-                </Stack>
-              ) : (
-                <Text c="dimmed">Select a run to view gallery items.</Text>
-              )}
-            </Stack>
-            <Select
-              placeholder="Select a run"
-              data={runOptions}
-              value={selectedRunId}
-              onChange={handleRunChange}
-              searchable
-              allowDeselect={false}
-              nothingFoundMessage="No runs"
-              disabled={!runOptions.length}
-              style={{ width: 280 }}
-            />
-          </Group>
+    <Container
+      fluid
+      py="xl"
+      style={{
+        minHeight: "100vh",
+        paddingBottom: "var(--mantine-spacing-xl)",
+      }}
+    >
+      <Stack gap="xl">
+        <WorkspaceNav />
+        <Group justify="space-between" align="flex-start" w="100%">
+          <Stack gap="xs">
+            <Title order={2}>Render Explorer</Title>
+            {selectedRun ? (
+              <Stack gap={2}>
+                <Group gap="xs">
+                  <Badge
+                    color={
+                      runStatusColor[
+                        selectedRun.status?.toLowerCase() ?? "pending"
+                      ] ?? "gray"
+                    }
+                  >
+                    {selectedRun.status ?? "pending"}
+                  </Badge>
+                  <Text fw={600}>Run {selectedRun.runId}</Text>
+                </Group>
+                <Text size="sm" c="dimmed">
+                  Mode {selectedRun.mode ?? "--"} | Folder{" "}
+                  {renderFolder ?? "--"}
+                </Text>
+                <Text size="sm" c="dimmed">
+                  {selectedRun.note?.trim() || "No operator note"}
+                </Text>
+                <Text size="sm">
+                  {selectedRun.completedJobs}/{selectedRun.totalJobs} completed
+                </Text>
+              </Stack>
+            ) : (
+              <Text c="dimmed">Select a run to view gallery items.</Text>
+            )}
+          </Stack>
+          <Select
+            placeholder="Select a run"
+            data={runOptions}
+            value={selectedRunId}
+            onChange={handleRunChange}
+            searchable
+            allowDeselect={false}
+            nothingFoundMessage="No runs"
+            disabled={!runOptions.length}
+            style={{ width: 280 }}
+          />
+        </Group>
 
+        <Box
+          ref={scrollContainerRef}
+          style={{ width: "100%", overflowX: "auto" }}
+        >
           <Box
             style={{
               display: "flex",
@@ -566,9 +572,9 @@ export default function GalleryRoute() {
               )}
             </Stack>
           </Box>
-        </Stack>
-      </Container>
-    </Box>
+        </Box>
+      </Stack>
+    </Container>
   );
 }
 
